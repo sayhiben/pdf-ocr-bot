@@ -84,7 +84,7 @@ ensure_venv() {
   if [[ ! -d "${venv_path}" ]]; then
     python3 -m venv --system-site-packages "${venv_path}"
   fi
-  pip_install "${venv_path}/bin/pip" install -U pip wheel setuptools
+  pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
 }
 
 install_paddle_stack() {
@@ -93,7 +93,7 @@ install_paddle_stack() {
 
   # Rendering deps
   log "[paddle] Installing render deps (pymupdf, pillow)"
-  pip_install "${pip}" install -U pymupdf pillow
+  pip_install "${pip}" -U pymupdf pillow
 
   # If paddle isn't installed, try a few CUDA wheel indexes.
   if ! "${py}" -c "import paddle" >/dev/null 2>&1; then
@@ -116,13 +116,13 @@ install_paddle_stack() {
     set -e
     if [[ "${install_status}" -ne 0 ]]; then
       echo "[paddle][WARN] Failed to install paddlepaddle-gpu. Falling back to CPU paddlepaddle."
-      pip_install "${pip}" install "paddlepaddle==${PADDLE_VER}"
+      pip_install "${pip}" "paddlepaddle==${PADDLE_VER}"
     fi
   fi
 
   # PaddleOCR doc parser
   log "[paddle] Installing PaddleOCR doc parser"
-  pip_install "${pip}" install -U "paddleocr[doc-parser]"
+  pip_install "${pip}" -U "paddleocr[doc-parser]"
 
   if ! "${py}" -c "import paddleocr" >/dev/null 2>&1; then
     echo "[paddle][ERROR] paddleocr import failed after install. Check Python version and PaddleOCR compatibility."
@@ -146,7 +146,7 @@ install_deepseek_stack() {
 
   # DeepSeek-OCR-2 known-good deps from their model card (pinning helps stability)
   log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow)"
-  pip_install "${pip}" install -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow
+  pip_install "${pip}" -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow
 }
 
 install_merge_stack() {
@@ -159,7 +159,7 @@ install_merge_stack() {
 
   # Qwen2.5-VL requires newer Transformers.
   log "[merge] Installing merge deps (transformers/accelerate/pillow/qwen-vl-utils)"
-  pip_install "${pip}" install -U "transformers>=4.48.0" accelerate pillow qwen-vl-utils
+  pip_install "${pip}" -U "transformers>=4.48.0" accelerate pillow qwen-vl-utils
 }
 
 # ---- 1) Paddle env: render + paddle OCR ----
