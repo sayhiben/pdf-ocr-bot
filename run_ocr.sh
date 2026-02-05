@@ -104,6 +104,10 @@ ensure_venv() {
       "${PYTHON_BIN}" -m venv "${venv_path}"
     fi
   fi
+  if [[ ! -x "${venv_path}/bin/pip" ]]; then
+    log "[venv] pip missing; bootstrapping with ensurepip"
+    "${venv_path}/bin/python" -m ensurepip --upgrade
+  fi
   pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
   log "[venv] ${venv_path} -> $("${venv_path}/bin/python" -V 2>&1) (system_site_packages=${use_system})"
 }
