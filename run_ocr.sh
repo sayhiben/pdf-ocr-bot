@@ -79,16 +79,30 @@ install_paddle_stack() {
     echo "[paddle] Installing paddlepaddle-gpu (will try a few CUDA indexes)..."
     PADDLE_VER="${PADDLE_VER:-3.2.1}"
     set +e
-    "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu126/ && set -e && return
-    "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu121/ && set -e && return
-    "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu118/ && set -e && return
+    "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    install_status=$?
+    if [[ "${install_status}" -ne 0 ]]; then
+      "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu121/
+      install_status=$?
+    fi
+    if [[ "${install_status}" -ne 0 ]]; then
+      "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+      install_status=$?
+    fi
     set -e
-    echo "[paddle][WARN] Failed to install paddlepaddle-gpu. Falling back to CPU paddlepaddle."
-    "${pip}" install "paddlepaddle==${PADDLE_VER}" >/dev/null
+    if [[ "${install_status}" -ne 0 ]]; then
+      echo "[paddle][WARN] Failed to install paddlepaddle-gpu. Falling back to CPU paddlepaddle."
+      "${pip}" install "paddlepaddle==${PADDLE_VER}" >/dev/null
+    fi
   fi
 
   # PaddleOCR doc parser
   "${pip}" install -U "paddleocr[doc-parser]" >/dev/null
+
+  if ! "${py}" -c "import paddleocr" >/dev/null 2>&1; then
+    echo "[paddle][ERROR] paddleocr import failed after install. Check Python version and PaddleOCR compatibility."
+    exit 3
+  fi
 
   echo "[paddle] Versions:"
   "${py}" -c "import paddle; print('  paddle:', paddle.__version__, 'cuda:', paddle.is_compiled_with_cuda())" || true
