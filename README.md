@@ -74,6 +74,7 @@ Environment variables supported by `run_ocr.sh`:
 - `SKIP_PIP_UPGRADE` (default `0`, set to `1` to avoid upgrading pip/wheel/setuptools each run)
 - `PIP_CACHE_DIR` (default `${WORKDIR}/.cache/pip`)
 - `XDG_CACHE_HOME` (default `${WORKDIR}/.cache`)
+- `PADDLEX_HOME` (default `${WORKDIR}/.paddlex`)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
 - `DEEPSEEK_ATTN` (default `sdpa`)
 - `DEEPSEEK_CROP_MODE` (default `1`)
@@ -86,6 +87,7 @@ Environment variables supported by `run_ocr.sh`:
 - `DEEPSEEK_USE_SYSTEM_SITE_PACKAGES` (default `1`)
 - `MERGE_USE_SYSTEM_SITE_PACKAGES` (default `1`)
 - `PADDLE_TORCH_CPU` (default `1`)
+- `PADDLE_NUMPY_PIN` (default `1`, pins `numpy<2` in the Paddle venv)
 
 **Manual Stages**
 You can run stages independently with `pdf_ocr.py` and `unify_results.py`.

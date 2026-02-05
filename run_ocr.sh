@@ -26,6 +26,8 @@ TORCH_CPU_INDEX_URL="${TORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu
 PIP_CACHE_DIR="${PIP_CACHE_DIR:-$WORKDIR/.cache/pip}"
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$WORKDIR/.cache}"
 SKIP_PIP_UPGRADE="${SKIP_PIP_UPGRADE:-0}"
+PADDLE_NUMPY_PIN="${PADDLE_NUMPY_PIN:-1}"
+PADDLEX_HOME="${PADDLEX_HOME:-$WORKDIR/.paddlex}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -53,6 +55,7 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export TOKENIZERS_PARALLELISM=false
 export PIP_CACHE_DIR
 export XDG_CACHE_HOME
+export PADDLEX_HOME
 
 ts() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -72,7 +75,7 @@ pip_install() {
   fi
 }
 
-mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}"
+mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}" "${PADDLEX_HOME}"
 
 if [[ ! -f "${PDF_OCR}" ]]; then
   echo "ERROR: missing ${PDF_OCR}"
@@ -96,6 +99,8 @@ log "[info] PADDLE_TORCH_CPU=${PADDLE_TORCH_CPU}"
 log "[info] PIP_CACHE_DIR=${PIP_CACHE_DIR}"
 log "[info] XDG_CACHE_HOME=${XDG_CACHE_HOME}"
 log "[info] SKIP_PIP_UPGRADE=${SKIP_PIP_UPGRADE}"
+log "[info] PADDLE_NUMPY_PIN=${PADDLE_NUMPY_PIN}"
+log "[info] PADDLEX_HOME=${PADDLEX_HOME}"
 
 # ---- Helpers ----
 ensure_venv() {
@@ -166,6 +171,11 @@ install_paddle_stack() {
   log "[paddle] Installing PaddleOCR doc parser"
   pip_install "${pip}" -U "paddleocr[doc-parser]"
 
+  if [[ "${PADDLE_NUMPY_PIN}" == "1" ]]; then
+    log "[paddle] Pinning numpy<2 to avoid numpy 2.x incompatibilities"
+    pip_install "${pip}" "numpy<2"
+  fi
+
   if [[ "${PADDLE_TORCH_CPU}" == "1" ]]; then
     if ! "${py}" -c "import torch" >/dev/null 2>&1; then
       log "[paddle] Installing CPU torch (for PaddleOCR deps)"
@@ -198,8 +208,8 @@ install_deepseek_stack() {
   fi
 
   # DeepSeek-OCR-2 known-good deps from their model card (pinning helps stability)
-  log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow)"
-  pip_install "${pip}" -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow
+  log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow/addict)"
+  pip_install "${pip}" -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow addict
 }
 
 install_merge_stack() {
