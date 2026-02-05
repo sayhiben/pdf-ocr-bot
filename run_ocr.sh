@@ -17,6 +17,7 @@ fi
 WORKDIR="${WORKDIR:-/workspace/work}"
 VENV_DIR="${VENV_DIR:-$WORKDIR/venvs}"
 PIP_QUIET="${PIP_QUIET:-0}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -77,14 +78,20 @@ log "[info] HF_HOME=${HF_HOME}"
 log "[info] PDF=${PDF_PATH}"
 log "[info] PAGES=${PAGES:-<all>}"
 log "[info] PIP_QUIET=${PIP_QUIET}"
+log "[info] PYTHON_BIN=${PYTHON_BIN}"
 
 # ---- Helpers ----
 ensure_venv() {
   local venv_path="$1"
+  if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+    echo "[error] Python not found: ${PYTHON_BIN}. Set PYTHON_BIN to a valid interpreter (e.g. python3.11)."
+    exit 2
+  fi
   if [[ ! -d "${venv_path}" ]]; then
-    python3 -m venv --system-site-packages "${venv_path}"
+    "${PYTHON_BIN}" -m venv --system-site-packages "${venv_path}"
   fi
   pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
+  log "[venv] ${venv_path} -> $("${venv_path}/bin/python" -V 2>&1)"
 }
 
 install_paddle_stack() {
@@ -124,7 +131,11 @@ install_paddle_stack() {
   log "[paddle] Installing PaddleOCR doc parser"
   pip_install "${pip}" -U "paddleocr[doc-parser]"
 
-  if ! "${py}" -c "import paddleocr" >/dev/null 2>&1; then
+  if ! "${py}" - <<'PY'
+import paddleocr
+print("paddleocr import OK", getattr(paddleocr, "__version__", "unknown"))
+PY
+  then
     echo "[paddle][ERROR] paddleocr import failed after install. Check Python version and PaddleOCR compatibility."
     exit 3
   fi
