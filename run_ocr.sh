@@ -106,6 +106,13 @@ ensure_venv() {
   fi
   if [[ ! -x "${venv_path}/bin/pip" ]]; then
     log "[venv] pip missing; bootstrapping with ensurepip"
+    "${venv_path}/bin/python" -m ensurepip --upgrade || true
+  fi
+  if ! "${venv_path}/bin/python" - <<'PY' >/dev/null 2>&1
+import pip  # noqa: F401
+PY
+  then
+    log "[venv] pip import failed; re-running ensurepip"
     "${venv_path}/bin/python" -m ensurepip --upgrade
   fi
   pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
