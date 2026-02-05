@@ -18,6 +18,11 @@ WORKDIR="${WORKDIR:-/workspace/work}"
 VENV_DIR="${VENV_DIR:-$WORKDIR/venvs}"
 PIP_QUIET="${PIP_QUIET:-0}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+PADDLE_USE_SYSTEM_SITE_PACKAGES="${PADDLE_USE_SYSTEM_SITE_PACKAGES:-0}"
+DEEPSEEK_USE_SYSTEM_SITE_PACKAGES="${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES:-1}"
+MERGE_USE_SYSTEM_SITE_PACKAGES="${MERGE_USE_SYSTEM_SITE_PACKAGES:-1}"
+PADDLE_TORCH_CPU="${PADDLE_TORCH_CPU:-1}"
+TORCH_CPU_INDEX_URL="${TORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -79,19 +84,28 @@ log "[info] PDF=${PDF_PATH}"
 log "[info] PAGES=${PAGES:-<all>}"
 log "[info] PIP_QUIET=${PIP_QUIET}"
 log "[info] PYTHON_BIN=${PYTHON_BIN}"
+log "[info] PADDLE_USE_SYSTEM_SITE_PACKAGES=${PADDLE_USE_SYSTEM_SITE_PACKAGES}"
+log "[info] DEEPSEEK_USE_SYSTEM_SITE_PACKAGES=${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES}"
+log "[info] MERGE_USE_SYSTEM_SITE_PACKAGES=${MERGE_USE_SYSTEM_SITE_PACKAGES}"
+log "[info] PADDLE_TORCH_CPU=${PADDLE_TORCH_CPU}"
 
 # ---- Helpers ----
 ensure_venv() {
   local venv_path="$1"
+  local use_system="${2:-1}"
   if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     echo "[error] Python not found: ${PYTHON_BIN}. Set PYTHON_BIN to a valid interpreter (e.g. python3.11)."
     exit 2
   fi
   if [[ ! -d "${venv_path}" ]]; then
-    "${PYTHON_BIN}" -m venv --system-site-packages "${venv_path}"
+    if [[ "${use_system}" == "1" ]]; then
+      "${PYTHON_BIN}" -m venv --system-site-packages "${venv_path}"
+    else
+      "${PYTHON_BIN}" -m venv "${venv_path}"
+    fi
   fi
   pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
-  log "[venv] ${venv_path} -> $("${venv_path}/bin/python" -V 2>&1)"
+  log "[venv] ${venv_path} -> $("${venv_path}/bin/python" -V 2>&1) (system_site_packages=${use_system})"
 }
 
 install_paddle_stack() {
@@ -130,6 +144,13 @@ install_paddle_stack() {
   # PaddleOCR doc parser
   log "[paddle] Installing PaddleOCR doc parser"
   pip_install "${pip}" -U "paddleocr[doc-parser]"
+
+  if [[ "${PADDLE_TORCH_CPU}" == "1" ]]; then
+    if ! "${py}" -c "import torch" >/dev/null 2>&1; then
+      log "[paddle] Installing CPU torch (for PaddleOCR deps)"
+      pip_install "${pip}" --index-url "${TORCH_CPU_INDEX_URL}" torch
+    fi
+  fi
 
   if ! "${py}" - <<'PY'
 import paddleocr
@@ -175,7 +196,7 @@ install_merge_stack() {
 
 # ---- 1) Paddle env: render + paddle OCR ----
 VENV_PADDLE="${VENV_DIR}/paddle"
-ensure_venv "${VENV_PADDLE}"
+ensure_venv "${VENV_PADDLE}" "${PADDLE_USE_SYSTEM_SITE_PACKAGES}"
 PY_PADDLE="${VENV_PADDLE}/bin/python"
 PIP_PADDLE="${VENV_PADDLE}/bin/pip"
 install_paddle_stack "${PY_PADDLE}" "${PIP_PADDLE}"
@@ -212,7 +233,7 @@ log "[step] PaddleOCR-VL candidates"
 
 # ---- 2) DeepSeek env: deepseek OCR ----
 VENV_DEEPSEEK="${VENV_DIR}/deepseek"
-ensure_venv "${VENV_DEEPSEEK}"
+ensure_venv "${VENV_DEEPSEEK}" "${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES}"
 PY_DEEPSEEK="${VENV_DEEPSEEK}/bin/python"
 PIP_DEEPSEEK="${VENV_DEEPSEEK}/bin/pip"
 install_deepseek_stack "${PY_DEEPSEEK}" "${PIP_DEEPSEEK}"
@@ -235,7 +256,7 @@ log "[step] DeepSeek-OCR-2 candidates"
 
 # ---- 3) Merge env: Qwen2.5-VL unify ----
 VENV_MERGE="${VENV_DIR}/merge"
-ensure_venv "${VENV_MERGE}"
+ensure_venv "${VENV_MERGE}" "${MERGE_USE_SYSTEM_SITE_PACKAGES}"
 PY_MERGE="${VENV_MERGE}/bin/python"
 PIP_MERGE="${VENV_MERGE}/bin/pip"
 install_merge_stack "${PY_MERGE}" "${PIP_MERGE}"
