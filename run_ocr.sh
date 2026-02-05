@@ -23,6 +23,9 @@ DEEPSEEK_USE_SYSTEM_SITE_PACKAGES="${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES:-1}"
 MERGE_USE_SYSTEM_SITE_PACKAGES="${MERGE_USE_SYSTEM_SITE_PACKAGES:-1}"
 PADDLE_TORCH_CPU="${PADDLE_TORCH_CPU:-1}"
 TORCH_CPU_INDEX_URL="${TORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
+PIP_CACHE_DIR="${PIP_CACHE_DIR:-$WORKDIR/.cache/pip}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$WORKDIR/.cache}"
+SKIP_PIP_UPGRADE="${SKIP_PIP_UPGRADE:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -48,6 +51,8 @@ MERGE_FAST="${MERGE_FAST:-1}"            # 1 = skip merger when candidates are n
 export HF_HOME="${HF_HOME:-$WORKDIR/.hf}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export TOKENIZERS_PARALLELISM=false
+export PIP_CACHE_DIR
+export XDG_CACHE_HOME
 
 ts() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -67,7 +72,7 @@ pip_install() {
   fi
 }
 
-mkdir -p "${WORKDIR}" "${VENV_DIR}"
+mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}"
 
 if [[ ! -f "${PDF_OCR}" ]]; then
   echo "ERROR: missing ${PDF_OCR}"
@@ -88,6 +93,9 @@ log "[info] PADDLE_USE_SYSTEM_SITE_PACKAGES=${PADDLE_USE_SYSTEM_SITE_PACKAGES}"
 log "[info] DEEPSEEK_USE_SYSTEM_SITE_PACKAGES=${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES}"
 log "[info] MERGE_USE_SYSTEM_SITE_PACKAGES=${MERGE_USE_SYSTEM_SITE_PACKAGES}"
 log "[info] PADDLE_TORCH_CPU=${PADDLE_TORCH_CPU}"
+log "[info] PIP_CACHE_DIR=${PIP_CACHE_DIR}"
+log "[info] XDG_CACHE_HOME=${XDG_CACHE_HOME}"
+log "[info] SKIP_PIP_UPGRADE=${SKIP_PIP_UPGRADE}"
 
 # ---- Helpers ----
 ensure_venv() {
@@ -115,7 +123,9 @@ PY
     log "[venv] pip import failed; re-running ensurepip"
     "${venv_path}/bin/python" -m ensurepip --upgrade
   fi
-  pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
+  if [[ "${SKIP_PIP_UPGRADE}" != "1" ]]; then
+    pip_install "${venv_path}/bin/pip" -U pip wheel setuptools
+  fi
   log "[venv] ${venv_path} -> $("${venv_path}/bin/python" -V 2>&1) (system_site_packages=${use_system})"
 }
 

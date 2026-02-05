@@ -65,10 +65,15 @@ If you see warnings that `torch.cuda.is_available()` is false, use a CUDA-enable
 **Configuration**
 Environment variables supported by `run_ocr.sh`:
 - `WORKDIR` (default `/workspace/work`)
+- `PYTHON_BIN` (default `python3`, set to `python3.11` if you need a stable ABI across pods)
 - `DPI` (default `350`)
 - `MAX_SIDE` (default `3600`)
 - `JPEG_QUALITY` (default `90`)
 - `PREFER_EMBEDDED` (default `1`)
+- `PIP_QUIET` (default `0`, set to `1` to silence pip output)
+- `SKIP_PIP_UPGRADE` (default `0`, set to `1` to avoid upgrading pip/wheel/setuptools each run)
+- `PIP_CACHE_DIR` (default `${WORKDIR}/.cache/pip`)
+- `XDG_CACHE_HOME` (default `${WORKDIR}/.cache`)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
 - `DEEPSEEK_ATTN` (default `sdpa`)
 - `DEEPSEEK_CROP_MODE` (default `1`)
@@ -77,6 +82,10 @@ Environment variables supported by `run_ocr.sh`:
 - `MERGE_FAST` (default `1`)
 - `PADDLE_VER` (default `3.2.1`)
 - `HF_HOME` and `TRANSFORMERS_CACHE` for model caching
+- `PADDLE_USE_SYSTEM_SITE_PACKAGES` (default `0`)
+- `DEEPSEEK_USE_SYSTEM_SITE_PACKAGES` (default `1`)
+- `MERGE_USE_SYSTEM_SITE_PACKAGES` (default `1`)
+- `PADDLE_TORCH_CPU` (default `1`)
 
 **Manual Stages**
 You can run stages independently with `pdf_ocr.py` and `unify_results.py`.
