@@ -78,7 +78,7 @@ Environment variables supported by `run_ocr.sh`:
 - `PADDLE_PDX_HOME` (default `${PADDLEX_HOME}`)
 - `PADDLE_PDX_CACHE_HOME` (default `${PADDLEX_HOME}`)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
-- `DEEPSEEK_ATTN` (default `sdpa`)
+- `DEEPSEEK_ATTN` (default `eager`)
 - `DEEPSEEK_CROP_MODE` (default `1`)
 - `MERGE_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
 - `MERGE_MAX_NEW_TOKENS` (default `4096`)

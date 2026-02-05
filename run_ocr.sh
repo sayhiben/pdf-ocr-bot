@@ -43,7 +43,7 @@ PREFER_EMBEDDED="${PREFER_EMBEDDED:-1}"   # 1 = attempt embedded extraction firs
 
 # ---- DeepSeek settings ----
 DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-ai/DeepSeek-OCR-2}"
-DEEPSEEK_ATTN="${DEEPSEEK_ATTN:-sdpa}"   # sdpa is safest; flash_attention_2 if installed
+DEEPSEEK_ATTN="${DEEPSEEK_ATTN:-eager}"   # eager is safest; flash_attention_2 if installed
 DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-1}" # 1 = crop_mode=True
 
 # ---- Merger model ----

@@ -416,21 +416,32 @@ def run_deepseek_ocr2(
 
     # HF usage recommends AutoTokenizer + AutoModel with trust_remote_code.  [oai_citation:2‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    try:
-        model = AutoModel.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            use_safetensors=True,
-            _attn_implementation=attn_implementation,
-        )
-    except Exception:
-        # Fallback attention implementation if flash-attn isn't installed/available
-        model = AutoModel.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            use_safetensors=True,
-            _attn_implementation="sdpa",
-        )
+    attn_candidates: List[str] = []
+    if attn_implementation:
+        attn_candidates.append(attn_implementation)
+    for cand in ("sdpa", "eager"):
+        if cand not in attn_candidates:
+            attn_candidates.append(cand)
+
+    model = None
+    last_err: Optional[Exception] = None
+    for impl in attn_candidates:
+        try:
+            model = AutoModel.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                use_safetensors=True,
+                _attn_implementation=impl,
+            )
+            if impl != attn_implementation:
+                LOG.warning("DeepSeek attn_implementation fallback: %s -> %s", attn_implementation, impl)
+            break
+        except Exception as ex:
+            last_err = ex
+            LOG.warning("DeepSeek attn_implementation=%s failed: %s", impl, ex)
+            continue
+    if model is None:
+        raise RuntimeError(f"Failed to load DeepSeek model with attn implementations: {attn_candidates}") from last_err
 
     model = model.eval()
     if device == "cuda":
@@ -546,7 +557,7 @@ def main() -> int:
     ap.add_argument("--deepseek-base-size", type=int, default=1024)
     ap.add_argument("--deepseek-image-size", type=int, default=768)
     ap.add_argument("--deepseek-crop-mode", action="store_true", help="Enable crop_mode=True in infer()")
-    ap.add_argument("--deepseek-attn", default="flash_attention_2", help="Attention impl: flash_attention_2 or sdpa")
+    ap.add_argument("--deepseek-attn", default="eager", help="Attention impl: flash_attention_2, sdpa, or eager")
 
     args = ap.parse_args()
 
