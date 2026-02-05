@@ -388,6 +388,7 @@ def run_deepseek_ocr2(
     image_size: int,
     crop_mode: bool,
     attn_implementation: str,
+    revision: str,
 ) -> Dict[str, object]:
     """
     Runs deepseek-ai/DeepSeek-OCR-2 on each page image.
@@ -415,7 +416,11 @@ def run_deepseek_ocr2(
     LOG.info("Loading DeepSeek model %s", model_id)
 
     # HF usage recommends AutoTokenizer + AutoModel with trust_remote_code.  [oai_citation:2‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id,
+        trust_remote_code=True,
+        revision=revision or None,
+    )
     attn_candidates: List[str] = []
     if attn_implementation:
         attn_candidates.append(attn_implementation)
@@ -432,6 +437,7 @@ def run_deepseek_ocr2(
                 trust_remote_code=True,
                 use_safetensors=True,
                 _attn_implementation=impl,
+                revision=revision or None,
             )
             if impl != attn_implementation:
                 LOG.warning("DeepSeek attn_implementation fallback: %s -> %s", attn_implementation, impl)
@@ -558,6 +564,7 @@ def main() -> int:
     ap.add_argument("--deepseek-image-size", type=int, default=768)
     ap.add_argument("--deepseek-crop-mode", action="store_true", help="Enable crop_mode=True in infer()")
     ap.add_argument("--deepseek-attn", default="eager", help="Attention impl: flash_attention_2, sdpa, or eager")
+    ap.add_argument("--deepseek-revision", default="", help="Pin a specific model revision (commit hash/tag) to avoid code updates.")
 
     args = ap.parse_args()
 
@@ -693,6 +700,7 @@ def main() -> int:
             image_size=args.deepseek_image_size,
             crop_mode=bool(args.deepseek_crop_mode),
             attn_implementation=args.deepseek_attn,
+            revision=args.deepseek_revision,
         )
         safe_write_json(deepseek_out / "manifest.json", manifest)
 

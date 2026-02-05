@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import logging
 import os
 import re
@@ -97,6 +98,11 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def looks_trivial(md: str) -> bool:
     stripped = re.sub(r"\s+", "", md)
     return len(stripped) < 80
@@ -106,6 +112,63 @@ def similarity(a: str, b: str, limit_chars: int = 20000) -> float:
     a0 = a[:limit_chars]
     b0 = b[:limit_chars]
     return difflib.SequenceMatcher(a=a0, b=b0).ratio()
+
+
+def diff_stats(a: str, b: str) -> Dict[str, int]:
+    a_lines = a.splitlines()
+    b_lines = b.splitlines()
+    sm = difflib.SequenceMatcher(a=a_lines, b=b_lines)
+    counts = {
+        "replace": 0,
+        "delete": 0,
+        "insert": 0,
+        "equal": 0,
+        "a_lines": len(a_lines),
+        "b_lines": len(b_lines),
+    }
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "replace":
+            counts["replace"] += max(i2 - i1, j2 - j1)
+        elif tag == "delete":
+            counts["delete"] += (i2 - i1)
+        elif tag == "insert":
+            counts["insert"] += (j2 - j1)
+        elif tag == "equal":
+            counts["equal"] += (i2 - i1)
+    return counts
+
+
+def write_diff_file(
+    diff_dir: Path,
+    page_num: int,
+    a: str,
+    b: str,
+    *,
+    context: int,
+    max_lines: int,
+) -> Optional[Path]:
+    if not diff_dir:
+        return None
+    diff_dir.mkdir(parents=True, exist_ok=True)
+    a_lines = a.splitlines()
+    b_lines = b.splitlines()
+    diff_iter = difflib.unified_diff(
+        a_lines,
+        b_lines,
+        fromfile=f"paddle/page_{page_num:04d}.md",
+        tofile=f"deepseek/page_{page_num:04d}.md",
+        lineterm="",
+        n=context,
+    )
+    lines: List[str] = []
+    for line in diff_iter:
+        lines.append(line)
+        if max_lines > 0 and len(lines) >= max_lines:
+            lines.append(f"... (truncated at {max_lines} lines)")
+            break
+    out_path = diff_dir / f"page_{page_num:04d}.diff"
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
 
 
 def find_candidate_markdown_paddle(page_dir: Path) -> Optional[Path]:
@@ -347,6 +410,10 @@ def main():
     ap.add_argument("--only-run-merger-when-different", action="store_true",
                     help="If candidates are nearly identical, skip merger and choose best candidate directly.")
     ap.add_argument("--similarity-threshold", type=float, default=0.975)
+    ap.add_argument("--report-dir", default="", type=str,
+                    help="If set, write per-page merge reports and candidate diffs to this directory.")
+    ap.add_argument("--diff-context", default=3, type=int, help="Context lines for candidate diff files.")
+    ap.add_argument("--diff-max-lines", default=400, type=int, help="Max lines to write per diff file (0 = no limit).")
 
     args = ap.parse_args()
 
@@ -362,6 +429,13 @@ def main():
     out_pages_dir = out_root / "pages"
     out_assets_dir = out_root / "assets"
     out_book = out_root / "book.md"
+    report_dir = Path(args.report_dir) if args.report_dir else None
+    diff_dir = (report_dir / "diffs") if report_dir else None
+    if report_dir:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        if diff_dir:
+            diff_dir.mkdir(parents=True, exist_ok=True)
+        LOG.info("Reports dir=%s", report_dir)
 
     # Determine pages to process
     page_img_map = discover_page_images(pages_dir)
@@ -390,6 +464,10 @@ def main():
     LOG.info("Processing %d pages", total_pages)
 
     combined_chunks: List[str] = []
+    decision_counts: Dict[str, int] = {}
+    skipped_existing = 0
+    skipped_missing_candidates = 0
+    processed_pages = 0
 
     for idx, page_img in enumerate(page_imgs, start=1):
         m = re.search(r"page_(\d+)\.", page_img.name)
@@ -409,6 +487,7 @@ def main():
             page_md_text = read_text(out_page_md)
             combined_chunks.append(f"\n\n<!-- PAGE {pnum:04d} -->\n\n" + page_md_text.replace("(../assets/", "(assets/"))
             LOG.debug("Skip page %04d (final exists)", pnum)
+            skipped_existing += 1
             continue
 
         # Load candidates
@@ -425,6 +504,7 @@ def main():
         # Ensure we at least have something
         if not paddle_md_raw and not deepseek_md_raw:
             LOG.warning("Page %04d: no candidates found, skipping.", pnum)
+            skipped_missing_candidates += 1
             continue
 
         # Copy the full page image into assets
@@ -454,15 +534,27 @@ def main():
             )
 
         # Cheap fast-paths (no merger call)
-        if looks_trivial(paddle_md) and not looks_trivial(deepseek_md):
-            final_md = deepseek_md
-        elif looks_trivial(deepseek_md) and not looks_trivial(paddle_md):
-            final_md = paddle_md
+        paddle_trivial = looks_trivial(paddle_md)
+        deepseek_trivial = looks_trivial(deepseek_md)
+        decision = ""
+        used_merger = False
+        sim = None
+        if paddle_trivial and not deepseek_trivial:
+            final_body = deepseek_md
+            decision = "deepseek_trivial" if paddle_md_raw else "deepseek_only"
+        elif deepseek_trivial and not paddle_trivial:
+            final_body = paddle_md
+            decision = "paddle_trivial" if deepseek_md_raw else "paddle_only"
         else:
             sim = similarity(paddle_md, deepseek_md)
             if args.only_run_merger_when_different and sim >= args.similarity_threshold:
                 # Pick the "richer" candidate (simple heuristic)
-                final_md = paddle_md if len(paddle_md) >= len(deepseek_md) else deepseek_md
+                if len(paddle_md) >= len(deepseek_md):
+                    final_body = paddle_md
+                    decision = "fastpath_similar_paddle"
+                else:
+                    final_body = deepseek_md
+                    decision = "fastpath_similar_deepseek"
                 LOG.debug("Page %04d: candidates similar (%.3f), skipping merger", pnum, sim)
             else:
                 prompt = build_merger_prompt(paddle_md, deepseek_md)
@@ -473,22 +565,73 @@ def main():
                     prompt_text=prompt,
                     max_new_tokens=args.max_new_tokens,
                 )
-                final_md = extract_markdown_from_fenced(out)
+                final_body = extract_markdown_from_fenced(out)
+                used_merger = True
+                decision = "merger"
+
+        final_body = final_body.strip()
 
         # Always include a top anchor image of the page (so you never “lose” diagrams)
         header = f"<!-- PAGE {pnum:04d} -->\n\n![]({rel_assets}/{page_ref})\n\n"
-        final_md = header + final_md.strip() + "\n"
+        final_md = header + final_body + "\n"
 
         write_text(out_page_md, final_md)
 
         # Add to combined book.md; fix ../assets -> assets when concatenating at root
         combined_chunks.append("\n\n" + final_md.replace("(../assets/", "(assets/"))
 
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+        processed_pages += 1
+        if report_dir:
+            diff_path = write_diff_file(
+                diff_dir,
+                pnum,
+                paddle_md,
+                deepseek_md,
+                context=args.diff_context,
+                max_lines=args.diff_max_lines,
+            )
+            report = {
+                "page": pnum,
+                "page_image": str(page_img),
+                "paddle_path": str(paddle_md_path) if paddle_md_path else None,
+                "deepseek_path": str(deepseek_md_path) if deepseek_md_path else None,
+                "decision": decision,
+                "used_merger": used_merger,
+                "similarity": sim,
+                "only_run_merger_when_different": args.only_run_merger_when_different,
+                "similarity_threshold": args.similarity_threshold,
+                "trivial": {"paddle": paddle_trivial, "deepseek": deepseek_trivial},
+                "lengths": {
+                    "paddle_chars": len(paddle_md),
+                    "deepseek_chars": len(deepseek_md),
+                    "final_chars": len(final_body),
+                },
+                "diff_stats_candidates": diff_stats(paddle_md, deepseek_md),
+                "diff_stats_final_vs_paddle": diff_stats(final_body, paddle_md),
+                "diff_stats_final_vs_deepseek": diff_stats(final_body, deepseek_md),
+                "diff_file": diff_path.name if diff_path else None,
+            }
+            report_path = report_dir / f"page_{pnum:04d}.json"
+            write_json(report_path, report)
+            LOG.info("Page %04d: decision=%s sim=%s report=%s", pnum, decision, f"{sim:.3f}" if sim is not None else "n/a", report_path)
+
         LOG.info("Page %04d -> %s", pnum, out_page_md)
 
     out_root.mkdir(parents=True, exist_ok=True)
     write_text(out_book, "\n".join(combined_chunks).strip() + "\n")
     LOG.info("Combined book -> %s", out_book)
+    if report_dir:
+        summary = {
+            "total_pages": total_pages,
+            "processed_pages": processed_pages,
+            "skipped_existing": skipped_existing,
+            "skipped_missing_candidates": skipped_missing_candidates,
+            "decision_counts": decision_counts,
+            "model": args.model,
+        }
+        write_json(report_dir / "summary.json", summary)
+        LOG.info("Report summary -> %s", report_dir / "summary.json")
 
 
 if __name__ == "__main__":

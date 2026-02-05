@@ -77,12 +77,18 @@ Environment variables supported by `run_ocr.sh`:
 - `PADDLEX_HOME` (default `${WORKDIR}/.paddlex`)
 - `PADDLE_PDX_HOME` (default `${PADDLEX_HOME}`)
 - `PADDLE_PDX_CACHE_HOME` (default `${PADDLEX_HOME}`)
+- `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` (default `1`)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
+- `DEEPSEEK_REVISION` (default empty; set to a commit hash/tag to pin model code)
 - `DEEPSEEK_ATTN` (default `eager`)
 - `DEEPSEEK_CROP_MODE` (default `1`)
 - `MERGE_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
 - `MERGE_MAX_NEW_TOKENS` (default `4096`)
 - `MERGE_FAST` (default `1`)
+- `MERGE_REPORT` (default `0`, set to `1` to write per-page merge reports + diffs)
+- `MERGE_REPORT_DIR` (default `${WORKDIR}/final/merge_reports`)
+- `MERGE_DIFF_CONTEXT` (default `3`, unified diff context lines)
+- `MERGE_DIFF_MAX_LINES` (default `400`, per-page diff line cap; `0` = no limit)
 - `PADDLE_VER` (default `3.2.1`)
 - `HF_HOME` and `TRANSFORMERS_CACHE` for model caching
 - `PADDLE_USE_SYSTEM_SITE_PACKAGES` (default `0`)
@@ -116,10 +122,12 @@ python3 unify_results.py \
   --paddle-root /path/to/work/ocr_paddle \
   --deepseek-root /path/to/work/ocr_deepseek \
   --out-root /path/to/work/final \
-  --page-range "1-300"
+  --page-range "1-300" \
+  --report-dir /path/to/work/final/merge_reports
 ```
 
 **Notes**
 - The pipeline is resume-safe. It skips existing page renders and OCR outputs unless overwrite flags are set.
 - Each run creates three venvs under `${WORKDIR}/venvs` (`paddle`, `deepseek`, `merge`).
 - `run_ocr.sh` assumes a CUDA-capable PyTorch is present in the base image; it does not install `torch` itself.
+- If `MERGE_REPORT=1`, per-page JSON reports and candidate diffs are written under `${WORKDIR}/final/merge_reports`.

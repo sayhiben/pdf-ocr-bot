@@ -43,6 +43,7 @@ PREFER_EMBEDDED="${PREFER_EMBEDDED:-1}"   # 1 = attempt embedded extraction firs
 
 # ---- DeepSeek settings ----
 DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-ai/DeepSeek-OCR-2}"
+DEEPSEEK_REVISION="${DEEPSEEK_REVISION:-}"
 DEEPSEEK_ATTN="${DEEPSEEK_ATTN:-eager}"   # eager is safest; flash_attention_2 if installed
 DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-1}" # 1 = crop_mode=True
 
@@ -50,16 +51,24 @@ DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-1}" # 1 = crop_mode=True
 MERGE_MODEL="${MERGE_MODEL:-Qwen/Qwen2.5-VL-7B-Instruct}"
 MERGE_MAX_NEW_TOKENS="${MERGE_MAX_NEW_TOKENS:-4096}"
 MERGE_FAST="${MERGE_FAST:-1}"            # 1 = skip merger when candidates are near-identical
+MERGE_REPORT="${MERGE_REPORT:-0}"         # 1 = write per-page merge reports + diffs
+MERGE_REPORT_DIR="${MERGE_REPORT_DIR:-$WORKDIR/final/merge_reports}"
+MERGE_DIFF_CONTEXT="${MERGE_DIFF_CONTEXT:-3}"
+MERGE_DIFF_MAX_LINES="${MERGE_DIFF_MAX_LINES:-400}"
 
 # ---- Cache locations ----
 export HF_HOME="${HF_HOME:-$WORKDIR/.hf}"
-export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
+if [[ -n "${TRANSFORMERS_CACHE:-}" ]]; then
+  export TRANSFORMERS_CACHE
+fi
 export TOKENIZERS_PARALLELISM=false
 export PIP_CACHE_DIR
 export XDG_CACHE_HOME
 export PADDLEX_HOME
 export PADDLE_PDX_HOME
 export PADDLE_PDX_CACHE_HOME
+PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK:-1}"
+export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK
 
 ts() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -107,6 +116,12 @@ log "[info] PADDLE_NUMPY_PIN=${PADDLE_NUMPY_PIN}"
 log "[info] PADDLEX_HOME=${PADDLEX_HOME}"
 log "[info] PADDLE_PDX_HOME=${PADDLE_PDX_HOME}"
 log "[info] PADDLE_PDX_CACHE_HOME=${PADDLE_PDX_CACHE_HOME}"
+log "[info] PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK}"
+log "[info] DEEPSEEK_REVISION=${DEEPSEEK_REVISION:-<none>}"
+log "[info] MERGE_REPORT=${MERGE_REPORT}"
+log "[info] MERGE_REPORT_DIR=${MERGE_REPORT_DIR}"
+log "[info] MERGE_DIFF_CONTEXT=${MERGE_DIFF_CONTEXT}"
+log "[info] MERGE_DIFF_MAX_LINES=${MERGE_DIFF_MAX_LINES}"
 
 # ---- Helpers ----
 ensure_venv() {
@@ -281,6 +296,9 @@ DEEPSEEK_ARGS=(
   --deepseek-model "${DEEPSEEK_MODEL}"
   --deepseek-attn "${DEEPSEEK_ATTN}"
 )
+if [[ -n "${DEEPSEEK_REVISION}" ]]; then
+  DEEPSEEK_ARGS+=( --deepseek-revision "${DEEPSEEK_REVISION}" )
+fi
 if [[ "${DEEPSEEK_CROP_MODE}" == "1" ]]; then
   DEEPSEEK_ARGS+=( --deepseek-crop-mode )
 fi
@@ -311,6 +329,13 @@ if [[ -n "${PAGES}" ]]; then
 fi
 if [[ "${MERGE_FAST}" == "1" ]]; then
   MERGE_ARGS+=( --only-run-merger-when-different )
+fi
+if [[ "${MERGE_REPORT}" == "1" ]]; then
+  MERGE_ARGS+=(
+    --report-dir "${MERGE_REPORT_DIR}"
+    --diff-context "${MERGE_DIFF_CONTEXT}"
+    --diff-max-lines "${MERGE_DIFF_MAX_LINES}"
+  )
 fi
 
 log "[step] Merge candidates -> final markdown"
