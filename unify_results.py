@@ -14,21 +14,33 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import logging
 import os
 import re
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 
 import torch
 from transformers import AutoModelForImageTextToText, AutoProcessor
+
+
+LOG = logging.getLogger("unify_results")
+
+
+def setup_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
 
 IMG_MD_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 IMG_HTML_RE = re.compile(r'<img[^>]*src=["\']([^"\']+)["\'][^>]*>', re.IGNORECASE)
 
 
-def parse_page_range(expr: str) -> List[int]:
+def parse_page_range(expr: str, max_page: Optional[int] = None) -> List[int]:
     """
     Accepts: "1-5", "1,2,10-12"
     Returns: sorted unique page numbers
@@ -43,14 +55,37 @@ def parse_page_range(expr: str) -> List[int]:
             continue
         if "-" in part:
             a, b = part.split("-", 1)
-            start = int(a)
-            end = int(b)
+            a = a.strip()
+            b = b.strip()
+            start = int(a) if a else 1
+            if b:
+                end = int(b)
+            else:
+                if max_page is None or max_page <= 0:
+                    raise ValueError("Open-ended page ranges require existing page images.")
+                end = max_page
             step = 1 if end >= start else -1
             for p in range(start, end + step, step):
                 pages.add(p)
         else:
             pages.add(int(part))
     return sorted(pages)
+
+
+def discover_page_images(pages_dir: Path) -> Dict[int, Path]:
+    """
+    Returns a map of page number -> image path, preferring jpg/jpeg over png/webp.
+    """
+    chosen: Dict[int, Path] = {}
+    for ext in ("jpg", "jpeg", "png", "webp"):
+        for p in pages_dir.glob(f"page_*.{ext}"):
+            m = re.search(r"page_(\d+)\.", p.name)
+            if not m:
+                continue
+            num = int(m.group(1))
+            if num not in chosen:
+                chosen[num] = p
+    return chosen
 
 
 def read_text(path: Path) -> str:
@@ -90,10 +125,12 @@ def find_candidate_markdown_deepseek(page_dir: Path) -> Optional[Path]:
 
 def copy_page_image(page_img: Path, out_asset_dir: Path) -> str:
     out_asset_dir.mkdir(parents=True, exist_ok=True)
-    dst = out_asset_dir / "page.jpg"
+    ext = page_img.suffix.lower() or ".jpg"
+    dst_name = f"page{ext}"
+    dst = out_asset_dir / dst_name
     if not dst.exists():
         shutil.copy2(page_img, dst)
-    return "page.jpg"
+    return dst_name
 
 
 def normalize_and_copy_images(
@@ -292,6 +329,7 @@ def run_merger_on_page(
 
 
 def main():
+    setup_logging()
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages-dir", required=True, type=str, help="Rendered page images: page_0001.jpg, ...")
     ap.add_argument("--paddle-root", required=True, type=str, help="Root folder containing Paddle outputs per page dir")
@@ -317,22 +355,38 @@ def main():
     deepseek_root = Path(args.deepseek_root)
     out_root = Path(args.out_root)
 
+    LOG.info("Pages dir=%s", pages_dir)
+    LOG.info("Paddle root=%s DeepSeek root=%s", paddle_root, deepseek_root)
+    LOG.info("Out root=%s Model=%s", out_root, args.model)
+
     out_pages_dir = out_root / "pages"
     out_assets_dir = out_root / "assets"
     out_book = out_root / "book.md"
 
     # Determine pages to process
+    page_img_map = discover_page_images(pages_dir)
+    max_page = max(page_img_map) if page_img_map else 0
     if args.page_range.strip():
-        pages = parse_page_range(args.page_range)
-        page_imgs = [pages_dir / f"page_{p:04d}.jpg" for p in pages]
+        try:
+            pages = parse_page_range(args.page_range, max_page=max_page)
+        except ValueError as ex:
+            raise SystemExit(str(ex))
+        page_imgs = []
+        for p in pages:
+            img = page_img_map.get(p)
+            if img is None:
+                LOG.warning("Missing page image for %04d in %s; skipping", p, pages_dir)
+                continue
+            page_imgs.append(img)
     else:
-        page_imgs = sorted(pages_dir.glob("page_*.jpg"))
+        page_imgs = [page_img_map[p] for p in sorted(page_img_map)]
 
     if not page_imgs:
         raise SystemExit(f"No page images found in {pages_dir}")
 
     # Load merger model once
     model, processor = load_merger(args.model, args.prefer_flash_attn, args.min_pixels, args.max_pixels)
+    LOG.info("Processing %d pages", len(page_imgs))
 
     combined_chunks: List[str] = []
 
@@ -352,6 +406,7 @@ def main():
             # Still include in combined book
             page_md_text = read_text(out_page_md)
             combined_chunks.append(f"\n\n<!-- PAGE {pnum:04d} -->\n\n" + page_md_text.replace("(../assets/", "(assets/"))
+            LOG.debug("Skip page %04d (final exists)", pnum)
             continue
 
         # Load candidates
@@ -363,11 +418,11 @@ def main():
 
         # Ensure we at least have something
         if not paddle_md_raw and not deepseek_md_raw:
-            print(f"[WARN] Page {pnum:04d}: no candidates found, skipping.")
+            LOG.warning("Page %04d: no candidates found, skipping.", pnum)
             continue
 
         # Copy the full page image into assets
-        copy_page_image(page_img, out_asset_page_dir)
+        page_ref = copy_page_image(page_img, out_asset_page_dir)
 
         # Normalize assets + rewrite paths so both candidates point into ../assets/page_XXXX
         rel_assets = f"../assets/page_{pnum:04d}"
@@ -402,6 +457,7 @@ def main():
             if args.only_run_merger_when_different and sim >= args.similarity_threshold:
                 # Pick the "richer" candidate (simple heuristic)
                 final_md = paddle_md if len(paddle_md) >= len(deepseek_md) else deepseek_md
+                LOG.debug("Page %04d: candidates similar (%.3f), skipping merger", pnum, sim)
             else:
                 prompt = build_merger_prompt(paddle_md, deepseek_md)
                 out = run_merger_on_page(
@@ -414,7 +470,7 @@ def main():
                 final_md = extract_markdown_from_fenced(out)
 
         # Always include a top anchor image of the page (so you never “lose” diagrams)
-        header = f"<!-- PAGE {pnum:04d} -->\n\n![]({rel_assets}/page.jpg)\n\n"
+        header = f"<!-- PAGE {pnum:04d} -->\n\n![]({rel_assets}/{page_ref})\n\n"
         final_md = header + final_md.strip() + "\n"
 
         write_text(out_page_md, final_md)
@@ -422,11 +478,11 @@ def main():
         # Add to combined book.md; fix ../assets -> assets when concatenating at root
         combined_chunks.append("\n\n" + final_md.replace("(../assets/", "(assets/"))
 
-        print(f"[OK] Page {pnum:04d} -> {out_page_md}")
+        LOG.info("Page %04d -> %s", pnum, out_page_md)
 
     out_root.mkdir(parents=True, exist_ok=True)
     write_text(out_book, "\n".join(combined_chunks).strip() + "\n")
-    print(f"[OK] Combined book -> {out_book}")
+    LOG.info("Combined book -> %s", out_book)
 
 
 if __name__ == "__main__":

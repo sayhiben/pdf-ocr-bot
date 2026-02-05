@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import re
 import sys
 import time
@@ -50,12 +52,23 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 
+LOG = logging.getLogger("pdf_ocr")
+
+
 # ----------------------------
 # Small utils
 # ----------------------------
 
 def eprint(*args) -> None:
-    print(*args, file=sys.stderr)
+    LOG.error(" ".join(str(a) for a in args))
+
+
+def setup_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
 
 def now_iso() -> str:
@@ -185,6 +198,14 @@ def render_pages(
     Render/extract each selected page to pages_dir/page_XXXX.<img_format>
     """
     ensure_dir(pages_dir)
+    LOG.info(
+        "Render: %d pages (dpi=%s max_side=%s format=%s prefer_embedded=%s)",
+        len(page_nums_1based),
+        dpi,
+        max_side,
+        img_format,
+        prefer_embedded,
+    )
 
     # Lazy imports so OCR-only runs can work in different envs
     import fitz  # PyMuPDF
@@ -199,6 +220,7 @@ def render_pages(
 
             out_img = pages_dir / f"page_{p1:04d}.{img_format}"
             if out_img.exists() and not overwrite_pages:
+                LOG.debug("Render skip page %04d (exists)", p1)
                 continue
 
             page = doc.load_page(p1 - 1)
@@ -224,6 +246,7 @@ def render_pages(
                         else:
                             im.save(out_img, "PNG")
                         tmp.unlink(missing_ok=True)
+                        LOG.debug("Render page %04d via embedded image", p1)
                         continue
                     except Exception:
                         # fallback to render below
@@ -280,6 +303,7 @@ def run_paddleocr_vl(
     Writes per-page markdown/json/assets to out_root/page_XXXX/.
     """
     ensure_dir(out_root)
+    LOG.info("PaddleOCR-VL: %d pages -> %s", len(page_nums_1based), out_root)
 
     # Lazy import so deepseek env doesn't need paddle installed
     from paddleocr import PaddleOCRVL  # type: ignore
@@ -309,6 +333,7 @@ def run_paddleocr_vl(
         existing_md = list(page_out.glob("*.md"))
         if existing_md and not overwrite_ocr:
             skipped.append(p1)
+            LOG.debug("Paddle skip page %04d (exists)", p1)
             continue
 
         try:
@@ -328,6 +353,7 @@ def run_paddleocr_vl(
         except Exception as ex:
             eprint(f"[paddle][ERROR] page {p1:04d}: {ex}")
 
+    LOG.info("PaddleOCR-VL done=%d skipped=%d", len(done), len(skipped))
     manifest = {
         "engine": "paddleocr_vl",
         "generated_at": now_iso(),
@@ -372,6 +398,15 @@ def run_deepseek_ocr2(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
+    LOG.info(
+        "DeepSeek-OCR-2: %d pages -> %s (device=%s dtype=%s attn=%s)",
+        len(page_nums_1based),
+        out_root,
+        device,
+        dtype,
+        attn_implementation,
+    )
+
     # HF usage recommends AutoTokenizer + AutoModel with trust_remote_code.  [oai_citation:2‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     try:
@@ -410,6 +445,7 @@ def run_deepseek_ocr2(
         result_mmd = page_out / "result.mmd"
         if result_mmd.exists() and not overwrite_ocr:
             skipped.append(p1)
+            LOG.debug("DeepSeek skip page %04d (exists)", p1)
             continue
 
         try:
@@ -442,6 +478,7 @@ def run_deepseek_ocr2(
         except Exception as ex:
             eprint(f"[deepseek][ERROR] page {p1:04d}: {ex}")
 
+    LOG.info("DeepSeek-OCR-2 done=%d skipped=%d", len(done), len(skipped))
     manifest = {
         "engine": "deepseek_ocr2",
         "generated_at": now_iso(),
@@ -466,6 +503,8 @@ def run_deepseek_ocr2(
 # ----------------------------
 
 def main() -> int:
+    setup_logging()
+
     ap = argparse.ArgumentParser(description="PDF -> per-page images -> OCR candidates (PaddleOCR-VL + DeepSeek-OCR-2).")
     ap.add_argument("--engine", required=True, choices=["render", "paddle", "deepseek", "all"],
                     help="Which stage to run.")
@@ -509,6 +548,8 @@ def main() -> int:
     pages_dir = Path(args.pages_dir).expanduser().resolve() if args.pages_dir else (workdir / "pages")
     paddle_out = Path(args.paddle_out).expanduser().resolve() if args.paddle_out else (workdir / "ocr_paddle")
     deepseek_out = Path(args.deepseek_out).expanduser().resolve() if args.deepseek_out else (workdir / "ocr_deepseek")
+    LOG.info("Workdir=%s pages_dir=%s", workdir, pages_dir)
+    LOG.info("Paddle out=%s DeepSeek out=%s", paddle_out, deepseek_out)
 
     # Determine page count (prefer PDF if available)
     pdf_path = Path(args.input).expanduser().resolve() if args.input else None
@@ -563,6 +604,7 @@ def main() -> int:
     if not page_nums:
         eprint("No pages selected.")
         return 2
+    LOG.info("Selected pages: %d", len(page_nums))
 
     # Helper: auto-render missing page images if requested
     def ensure_page_images_exist() -> None:
