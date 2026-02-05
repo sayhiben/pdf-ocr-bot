@@ -28,6 +28,8 @@ XDG_CACHE_HOME="${XDG_CACHE_HOME:-$WORKDIR/.cache}"
 SKIP_PIP_UPGRADE="${SKIP_PIP_UPGRADE:-0}"
 PADDLE_NUMPY_PIN="${PADDLE_NUMPY_PIN:-1}"
 PADDLEX_HOME="${PADDLEX_HOME:-$WORKDIR/.paddlex}"
+PADDLE_PDX_HOME="${PADDLE_PDX_HOME:-$PADDLEX_HOME}"
+PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$PADDLEX_HOME}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -56,6 +58,8 @@ export TOKENIZERS_PARALLELISM=false
 export PIP_CACHE_DIR
 export XDG_CACHE_HOME
 export PADDLEX_HOME
+export PADDLE_PDX_HOME
+export PADDLE_PDX_CACHE_HOME
 
 ts() {
   date "+%Y-%m-%d %H:%M:%S"
@@ -75,7 +79,7 @@ pip_install() {
   fi
 }
 
-mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}" "${PADDLEX_HOME}"
+mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}" "${PADDLEX_HOME}" "${PADDLE_PDX_HOME}" "${PADDLE_PDX_CACHE_HOME}"
 
 if [[ ! -f "${PDF_OCR}" ]]; then
   echo "ERROR: missing ${PDF_OCR}"
@@ -101,6 +105,8 @@ log "[info] XDG_CACHE_HOME=${XDG_CACHE_HOME}"
 log "[info] SKIP_PIP_UPGRADE=${SKIP_PIP_UPGRADE}"
 log "[info] PADDLE_NUMPY_PIN=${PADDLE_NUMPY_PIN}"
 log "[info] PADDLEX_HOME=${PADDLEX_HOME}"
+log "[info] PADDLE_PDX_HOME=${PADDLE_PDX_HOME}"
+log "[info] PADDLE_PDX_CACHE_HOME=${PADDLE_PDX_CACHE_HOME}"
 
 # ---- Helpers ----
 ensure_venv() {
@@ -208,8 +214,8 @@ install_deepseek_stack() {
   fi
 
   # DeepSeek-OCR-2 known-good deps from their model card (pinning helps stability)
-  log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow/addict)"
-  pip_install "${pip}" -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow addict
+  log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow/addict/einops)"
+  pip_install "${pip}" -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow addict einops
 }
 
 install_merge_stack() {

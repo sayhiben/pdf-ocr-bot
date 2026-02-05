@@ -75,6 +75,8 @@ Environment variables supported by `run_ocr.sh`:
 - `PIP_CACHE_DIR` (default `${WORKDIR}/.cache/pip`)
 - `XDG_CACHE_HOME` (default `${WORKDIR}/.cache`)
 - `PADDLEX_HOME` (default `${WORKDIR}/.paddlex`)
+- `PADDLE_PDX_HOME` (default `${PADDLEX_HOME}`)
+- `PADDLE_PDX_CACHE_HOME` (default `${PADDLEX_HOME}`)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
 - `DEEPSEEK_ATTN` (default `sdpa`)
 - `DEEPSEEK_CROP_MODE` (default `1`)
