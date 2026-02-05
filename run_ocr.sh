@@ -16,6 +16,7 @@ fi
 # ---- Paths (edit if you want) ----
 WORKDIR="${WORKDIR:-/workspace/work}"
 VENV_DIR="${VENV_DIR:-$WORKDIR/venvs}"
+PIP_QUIET="${PIP_QUIET:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -42,6 +43,24 @@ export HF_HOME="${HF_HOME:-$WORKDIR/.hf}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export TOKENIZERS_PARALLELISM=false
 
+ts() {
+  date "+%Y-%m-%d %H:%M:%S"
+}
+
+log() {
+  echo "[$(ts)] $*"
+}
+
+pip_install() {
+  local pip="$1"
+  shift
+  if [[ "${PIP_QUIET}" == "1" ]]; then
+    "${pip}" install "$@" >/dev/null
+  else
+    "${pip}" install "$@"
+  fi
+}
+
 mkdir -p "${WORKDIR}" "${VENV_DIR}"
 
 if [[ ! -f "${PDF_OCR}" ]]; then
@@ -53,10 +72,11 @@ if [[ ! -f "${UNIFY}" ]]; then
   exit 2
 fi
 
-echo "[info] WORKDIR=${WORKDIR}"
-echo "[info] HF_HOME=${HF_HOME}"
-echo "[info] PDF=${PDF_PATH}"
-echo "[info] PAGES=${PAGES:-<all>}"
+log "[info] WORKDIR=${WORKDIR}"
+log "[info] HF_HOME=${HF_HOME}"
+log "[info] PDF=${PDF_PATH}"
+log "[info] PAGES=${PAGES:-<all>}"
+log "[info] PIP_QUIET=${PIP_QUIET}"
 
 # ---- Helpers ----
 ensure_venv() {
@@ -64,7 +84,7 @@ ensure_venv() {
   if [[ ! -d "${venv_path}" ]]; then
     python3 -m venv --system-site-packages "${venv_path}"
   fi
-  "${venv_path}/bin/python" -m pip install -U pip wheel setuptools >/dev/null
+  pip_install "${venv_path}/bin/python" -m pip install -U pip wheel setuptools
 }
 
 install_paddle_stack() {
@@ -72,32 +92,37 @@ install_paddle_stack() {
   local pip="$2"
 
   # Rendering deps
-  "${pip}" install -U pymupdf pillow >/dev/null
+  log "[paddle] Installing render deps (pymupdf, pillow)"
+  pip_install "${pip}" install -U pymupdf pillow
 
   # If paddle isn't installed, try a few CUDA wheel indexes.
   if ! "${py}" -c "import paddle" >/dev/null 2>&1; then
     echo "[paddle] Installing paddlepaddle-gpu (will try a few CUDA indexes)..."
     PADDLE_VER="${PADDLE_VER:-3.2.1}"
     set +e
+    log "[paddle] Attempting paddlepaddle-gpu==${PADDLE_VER} (cu126)"
     "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
     install_status=$?
     if [[ "${install_status}" -ne 0 ]]; then
+      log "[paddle] Attempting paddlepaddle-gpu==${PADDLE_VER} (cu121)"
       "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu121/
       install_status=$?
     fi
     if [[ "${install_status}" -ne 0 ]]; then
+      log "[paddle] Attempting paddlepaddle-gpu==${PADDLE_VER} (cu118)"
       "${pip}" install "paddlepaddle-gpu==${PADDLE_VER}" -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
       install_status=$?
     fi
     set -e
     if [[ "${install_status}" -ne 0 ]]; then
       echo "[paddle][WARN] Failed to install paddlepaddle-gpu. Falling back to CPU paddlepaddle."
-      "${pip}" install "paddlepaddle==${PADDLE_VER}" >/dev/null
+      pip_install "${pip}" install "paddlepaddle==${PADDLE_VER}"
     fi
   fi
 
   # PaddleOCR doc parser
-  "${pip}" install -U "paddleocr[doc-parser]" >/dev/null
+  log "[paddle] Installing PaddleOCR doc parser"
+  pip_install "${pip}" install -U "paddleocr[doc-parser]"
 
   if ! "${py}" -c "import paddleocr" >/dev/null 2>&1; then
     echo "[paddle][ERROR] paddleocr import failed after install. Check Python version and PaddleOCR compatibility."
@@ -120,7 +145,8 @@ install_deepseek_stack() {
   fi
 
   # DeepSeek-OCR-2 known-good deps from their model card (pinning helps stability)
-  "${pip}" install -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow >/dev/null
+  log "[deepseek] Installing DeepSeek deps (transformers/tokenizers/accelerate/pillow)"
+  pip_install "${pip}" install -U "transformers==4.47.1" "tokenizers==0.21.0" "accelerate>=0.30.0" pillow
 }
 
 install_merge_stack() {
@@ -132,7 +158,8 @@ install_merge_stack() {
   fi
 
   # Qwen2.5-VL requires newer Transformers.
-  "${pip}" install -U "transformers>=4.48.0" accelerate pillow qwen-vl-utils >/dev/null
+  log "[merge] Installing merge deps (transformers/accelerate/pillow/qwen-vl-utils)"
+  pip_install "${pip}" install -U "transformers>=4.48.0" accelerate pillow qwen-vl-utils
 }
 
 # ---- 1) Paddle env: render + paddle OCR ----
@@ -158,7 +185,7 @@ if [[ -n "${PAGES}" ]]; then
   RENDER_ARGS+=( --pages "${PAGES}" )
 fi
 
-echo "[step] Render pages"
+log "[step] Render pages"
 "${PY_PADDLE}" "${PDF_OCR}" "${RENDER_ARGS[@]}"
 
 PADDLE_ARGS=(
@@ -169,7 +196,7 @@ if [[ -n "${PAGES}" ]]; then
   PADDLE_ARGS+=( --pages "${PAGES}" )
 fi
 
-echo "[step] PaddleOCR-VL candidates"
+log "[step] PaddleOCR-VL candidates"
 "${PY_PADDLE}" "${PDF_OCR}" "${PADDLE_ARGS[@]}"
 
 # ---- 2) DeepSeek env: deepseek OCR ----
@@ -192,7 +219,7 @@ if [[ -n "${PAGES}" ]]; then
   DEEPSEEK_ARGS+=( --pages "${PAGES}" )
 fi
 
-echo "[step] DeepSeek-OCR-2 candidates"
+log "[step] DeepSeek-OCR-2 candidates"
 "${PY_DEEPSEEK}" "${PDF_OCR}" "${DEEPSEEK_ARGS[@]}"
 
 # ---- 3) Merge env: Qwen2.5-VL unify ----
@@ -217,11 +244,11 @@ if [[ "${MERGE_FAST}" == "1" ]]; then
   MERGE_ARGS+=( --only-run-merger-when-different )
 fi
 
-echo "[step] Merge candidates -> final markdown"
+log "[step] Merge candidates -> final markdown"
 "${PY_MERGE}" "${UNIFY}" "${MERGE_ARGS[@]}"
 
 echo ""
-echo "[done] Final outputs:"
-echo "  - Combined markdown: ${WORKDIR}/final/book.md"
-echo "  - Per-page markdown: ${WORKDIR}/final/pages/"
-echo "  - Unified assets:    ${WORKDIR}/final/assets/"
+log "[done] Final outputs:"
+log "  - Combined markdown: ${WORKDIR}/final/book.md"
+log "  - Per-page markdown: ${WORKDIR}/final/pages/"
+log "  - Unified assets:    ${WORKDIR}/final/assets/"

@@ -198,9 +198,10 @@ def render_pages(
     Render/extract each selected page to pages_dir/page_XXXX.<img_format>
     """
     ensure_dir(pages_dir)
+    total_pages = len(page_nums_1based)
     LOG.info(
         "Render: %d pages (dpi=%s max_side=%s format=%s prefer_embedded=%s)",
-        len(page_nums_1based),
+        total_pages,
         dpi,
         max_side,
         img_format,
@@ -214,7 +215,8 @@ def render_pages(
     doc = fitz.open(pdf_path)
     try:
         page_count = doc.page_count
-        for p1 in page_nums_1based:
+        for idx, p1 in enumerate(page_nums_1based, start=1):
+            LOG.info("Render page %04d (%d/%d)", p1, idx, total_pages)
             if not (1 <= p1 <= page_count):
                 continue
 
@@ -268,7 +270,7 @@ def render_pages(
             else:
                 im.save(out_img, "PNG")
 
-            print(f"[render] page {p1:04d} -> {out_img.name}")
+            LOG.info("Render page %04d -> %s", p1, out_img.name)
 
         manifest = {
             "pdf": str(pdf_path),
@@ -303,7 +305,9 @@ def run_paddleocr_vl(
     Writes per-page markdown/json/assets to out_root/page_XXXX/.
     """
     ensure_dir(out_root)
-    LOG.info("PaddleOCR-VL: %d pages -> %s", len(page_nums_1based), out_root)
+    total_pages = len(page_nums_1based)
+    LOG.info("PaddleOCR-VL: %d pages -> %s", total_pages, out_root)
+    LOG.info("Loading PaddleOCR-VL pipeline")
 
     # Lazy import so deepseek env doesn't need paddle installed
     from paddleocr import PaddleOCRVL  # type: ignore
@@ -320,7 +324,8 @@ def run_paddleocr_vl(
     done: List[int] = []
     skipped: List[int] = []
 
-    for p1 in page_nums_1based:
+    for idx, p1 in enumerate(page_nums_1based, start=1):
+        LOG.info("Paddle page %04d (%d/%d)", p1, idx, total_pages)
         img_path = get_page_image_path(pages_dir, p1)
         if img_path is None:
             eprint(f"[paddle] missing page image for {p1:04d} in {pages_dir}")
@@ -349,7 +354,7 @@ def run_paddleocr_vl(
                 "vl_rec_server_url": vl_rec_server_url,
             })
             done.append(p1)
-            print(f"[paddle] page {p1:04d} -> {page_out}")
+            LOG.info("Paddle page %04d -> %s", p1, page_out)
         except Exception as ex:
             eprint(f"[paddle][ERROR] page {p1:04d}: {ex}")
 
@@ -398,14 +403,16 @@ def run_deepseek_ocr2(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
+    total_pages = len(page_nums_1based)
     LOG.info(
         "DeepSeek-OCR-2: %d pages -> %s (device=%s dtype=%s attn=%s)",
-        len(page_nums_1based),
+        total_pages,
         out_root,
         device,
         dtype,
         attn_implementation,
     )
+    LOG.info("Loading DeepSeek model %s", model_id)
 
     # HF usage recommends AutoTokenizer + AutoModel with trust_remote_code.  [oai_citation:2‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
@@ -432,7 +439,8 @@ def run_deepseek_ocr2(
     done: List[int] = []
     skipped: List[int] = []
 
-    for p1 in page_nums_1based:
+    for idx, p1 in enumerate(page_nums_1based, start=1):
+        LOG.info("DeepSeek page %04d (%d/%d)", p1, idx, total_pages)
         img_path = get_page_image_path(pages_dir, p1)
         if img_path is None:
             eprint(f"[deepseek] missing page image for {p1:04d} in {pages_dir}")
@@ -474,7 +482,7 @@ def run_deepseek_ocr2(
                 "dtype": str(dtype),
             })
             done.append(p1)
-            print(f"[deepseek] page {p1:04d} -> {page_out}")
+            LOG.info("DeepSeek page %04d -> %s", p1, page_out)
         except Exception as ex:
             eprint(f"[deepseek][ERROR] page {p1:04d}: {ex}")
 

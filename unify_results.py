@@ -386,15 +386,17 @@ def main():
 
     # Load merger model once
     model, processor = load_merger(args.model, args.prefer_flash_attn, args.min_pixels, args.max_pixels)
-    LOG.info("Processing %d pages", len(page_imgs))
+    total_pages = len(page_imgs)
+    LOG.info("Processing %d pages", total_pages)
 
     combined_chunks: List[str] = []
 
-    for page_img in page_imgs:
+    for idx, page_img in enumerate(page_imgs, start=1):
         m = re.search(r"page_(\d+)\.", page_img.name)
         if not m:
             continue
         pnum = int(m.group(1))
+        LOG.info("Merge page %04d (%d/%d)", pnum, idx, total_pages)
 
         paddle_page_dir = paddle_root / f"page_{pnum:04d}"
         deepseek_page_dir = deepseek_root / f"page_{pnum:04d}"
@@ -412,6 +414,10 @@ def main():
         # Load candidates
         paddle_md_path = find_candidate_markdown_paddle(paddle_page_dir) if paddle_page_dir.exists() else None
         deepseek_md_path = find_candidate_markdown_deepseek(deepseek_page_dir) if deepseek_page_dir.exists() else None
+        if not paddle_md_path:
+            LOG.debug("Page %04d: no Paddle markdown found", pnum)
+        if not deepseek_md_path:
+            LOG.debug("Page %04d: no DeepSeek markdown found", pnum)
 
         paddle_md_raw = read_text(paddle_md_path) if paddle_md_path else ""
         deepseek_md_raw = read_text(deepseek_md_path) if deepseek_md_path else ""
