@@ -84,7 +84,7 @@ ensure_venv() {
   if [[ ! -d "${venv_path}" ]]; then
     python3 -m venv --system-site-packages "${venv_path}"
   fi
-  pip_install "${venv_path}/bin/python" -m pip install -U pip wheel setuptools
+  pip_install "${venv_path}/bin/pip" install -U pip wheel setuptools
 }
 
 install_paddle_stack() {
