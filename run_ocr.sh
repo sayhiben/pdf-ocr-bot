@@ -48,6 +48,9 @@ DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-ai/DeepSeek-OCR-2}"
 DEEPSEEK_REVISION="${DEEPSEEK_REVISION:-}"
 DEEPSEEK_ATTN="${DEEPSEEK_ATTN:-eager}"   # eager is safest; flash_attention_2 if installed
 DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-0}" # 1 = crop_mode=True
+DEEPSEEK_PAGE_TIMEOUT="${DEEPSEEK_PAGE_TIMEOUT:-20}" # seconds; 0 disables timeout
+DEEPSEEK_BASE_SIZE="${DEEPSEEK_BASE_SIZE:-1024}"
+DEEPSEEK_IMAGE_SIZE="${DEEPSEEK_IMAGE_SIZE:-768}"
 
 # ---- Merger model ----
 MERGE_MODEL="${MERGE_MODEL:-Qwen/Qwen2.5-VL-7B-Instruct}"
@@ -152,6 +155,9 @@ log "[info] PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=${PADDLE_PDX_DISABLE_MODEL_SOU
 log "[info] INSTALL_RSYNC=${INSTALL_RSYNC}"
 log "[info] OVERWRITE_ALL=${OVERWRITE_ALL}"
 log "[info] DEEPSEEK_REVISION=${DEEPSEEK_REVISION:-<none>}"
+log "[info] DEEPSEEK_PAGE_TIMEOUT=${DEEPSEEK_PAGE_TIMEOUT}"
+log "[info] DEEPSEEK_BASE_SIZE=${DEEPSEEK_BASE_SIZE}"
+log "[info] DEEPSEEK_IMAGE_SIZE=${DEEPSEEK_IMAGE_SIZE}"
 log "[info] MERGE_REPORT=${MERGE_REPORT}"
 log "[info] MERGE_REPORT_DIR=${MERGE_REPORT_DIR}"
 log "[info] MERGE_DIFF_CONTEXT=${MERGE_DIFF_CONTEXT}"
@@ -337,12 +343,17 @@ DEEPSEEK_ARGS=(
   --workdir "${WORKDIR}"
   --deepseek-model "${DEEPSEEK_MODEL}"
   --deepseek-attn "${DEEPSEEK_ATTN}"
+  --deepseek-base-size "${DEEPSEEK_BASE_SIZE}"
+  --deepseek-image-size "${DEEPSEEK_IMAGE_SIZE}"
 )
 if [[ -n "${DEEPSEEK_REVISION}" ]]; then
   DEEPSEEK_ARGS+=( --deepseek-revision "${DEEPSEEK_REVISION}" )
 fi
 if [[ "${DEEPSEEK_CROP_MODE}" == "1" ]]; then
   DEEPSEEK_ARGS+=( --deepseek-crop-mode )
+fi
+if [[ "${DEEPSEEK_PAGE_TIMEOUT}" != "0" ]]; then
+  DEEPSEEK_ARGS+=( --deepseek-page-timeout "${DEEPSEEK_PAGE_TIMEOUT}" )
 fi
 if [[ "${OVERWRITE_ALL}" == "1" ]]; then
   DEEPSEEK_ARGS+=( --overwrite-ocr )

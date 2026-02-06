@@ -540,9 +540,11 @@ Rules (must follow):
 4) Do NOT invent content. If uncertain, choose the most plausible text supported by either candidate and/or the page image.
 5) Preserve exact numbers, dice notation (e.g. 2d6+3), symbols, and proper nouns.
 6) You may keep or drop low-value decorative artifacts, but keep meaningful sidebars, callouts, tables, charts.
-7) If the page contains charts/diagrams/flowcharts/schematics, keep the original image link for them.
+7) If the page is a categorized list or "table of categories" (like a skills list), output it as a hierarchical unordered list.
+   Use top-level bullets for main categories and nested bullets for subcategories/items. Preserve column order (left-to-right, top-to-bottom).
+8) If the page contains charts/diagrams/flowcharts/schematics, keep the original image link for them.
    Do NOT attempt to recreate charts/diagrams in Mermaid or ASCII.
-8) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
+9) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
 
 Candidate A (PaddleOCR-VL):
 ---BEGIN A---

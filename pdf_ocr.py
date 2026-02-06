@@ -376,44 +376,16 @@ def run_paddleocr_vl(
 # OCR: DeepSeek-OCR-2
 # ----------------------------
 
-def run_deepseek_ocr2(
-    pages_dir: Path,
-    out_root: Path,
-    page_nums_1based: Sequence[int],
-    *,
-    overwrite_ocr: bool,
+def load_deepseek_model(
     model_id: str,
-    prompt: str,
-    base_size: int,
-    image_size: int,
-    crop_mode: bool,
     attn_implementation: str,
     revision: str,
-) -> Dict[str, object]:
-    """
-    Runs deepseek-ai/DeepSeek-OCR-2 on each page image.
-    Uses model.infer(tokenizer, ..., save_results=True) which writes:
-      - result.mmd
-      - images/{idx}.jpg
-    """
-    ensure_dir(out_root)
-
+):
     import torch
     from transformers import AutoModel, AutoTokenizer  # type: ignore
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
-
-    total_pages = len(page_nums_1based)
-    LOG.info(
-        "DeepSeek-OCR-2: %d pages -> %s (device=%s dtype=%s attn=%s)",
-        total_pages,
-        out_root,
-        device,
-        dtype,
-        attn_implementation,
-    )
-    LOG.info("Loading DeepSeek model %s", model_id)
 
     # HF usage recommends AutoTokenizer + AutoModel with trust_remote_code.  [oai_citation:2‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -421,6 +393,7 @@ def run_deepseek_ocr2(
         trust_remote_code=True,
         revision=revision or None,
     )
+
     attn_candidates: List[str] = []
     if attn_implementation:
         attn_candidates.append(attn_implementation)
@@ -453,57 +426,207 @@ def run_deepseek_ocr2(
     if device == "cuda":
         model = model.cuda().to(dtype)
 
+    return tokenizer, model, device, dtype
+
+
+def _deepseek_single_page_worker(
+    queue,
+    *,
+    img_path: str,
+    page_out: str,
+    model_id: str,
+    prompt: str,
+    base_size: int,
+    image_size: int,
+    crop_mode: bool,
+    attn_implementation: str,
+    revision: str,
+) -> None:
+    try:
+        tokenizer, model, device, dtype = load_deepseek_model(
+            model_id=model_id,
+            attn_implementation=attn_implementation,
+            revision=revision,
+        )
+        _ = model.infer(
+            tokenizer,
+            prompt=prompt,
+            image_file=img_path,
+            output_path=page_out,
+            base_size=base_size,
+            image_size=image_size,
+            crop_mode=crop_mode,
+            save_results=True,
+        )
+        safe_write_json(Path(page_out) / "meta.json", {
+            "engine": "deepseek_ocr2",
+            "generated_at": now_iso(),
+            "input_image": img_path,
+            "model_id": model_id,
+            "prompt": prompt,
+            "base_size": base_size,
+            "image_size": image_size,
+            "crop_mode": crop_mode,
+            "attn_implementation": attn_implementation,
+            "device": device,
+            "dtype": str(dtype),
+        })
+        queue.put({"ok": True})
+    except Exception as ex:
+        queue.put({"ok": False, "error": str(ex)})
+
+def run_deepseek_ocr2(
+    pages_dir: Path,
+    out_root: Path,
+    page_nums_1based: Sequence[int],
+    *,
+    overwrite_ocr: bool,
+    model_id: str,
+    prompt: str,
+    base_size: int,
+    image_size: int,
+    crop_mode: bool,
+    attn_implementation: str,
+    revision: str,
+    page_timeout_sec: int,
+) -> Dict[str, object]:
+    """
+    Runs deepseek-ai/DeepSeek-OCR-2 on each page image.
+    Uses model.infer(tokenizer, ..., save_results=True) which writes:
+      - result.mmd
+      - images/{idx}.jpg
+    """
+    ensure_dir(out_root)
+    total_pages = len(page_nums_1based)
+    LOG.info(
+        "DeepSeek-OCR-2: %d pages -> %s (attn=%s timeout=%s)",
+        total_pages,
+        out_root,
+        attn_implementation,
+        f"{page_timeout_sec}s" if page_timeout_sec and page_timeout_sec > 0 else "none",
+    )
     done: List[int] = []
     skipped: List[int] = []
+    timed_out: List[int] = []
+    device = "unknown"
+    dtype = "unknown"
 
-    for idx, p1 in enumerate(page_nums_1based, start=1):
-        LOG.info("DeepSeek page %04d (%d/%d)", p1, idx, total_pages)
-        img_path = get_page_image_path(pages_dir, p1)
-        if img_path is None:
-            eprint(f"[deepseek] missing page image for {p1:04d} in {pages_dir}")
-            continue
+    if page_timeout_sec and page_timeout_sec > 0:
+        import multiprocessing as mp
+        import queue as queue_mod
 
-        page_out = out_root / f"page_{p1:04d}"
-        ensure_dir(page_out)
+        LOG.warning("DeepSeek per-page timeout enabled. Model will be loaded in a subprocess for each page.")
+        ctx = mp.get_context("spawn")
 
-        # DeepSeek code writes {output_path}/result.mmd when save_results=True.  [oai_citation:3‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2/blob/main/modeling_deepseekocr2.py)
-        result_mmd = page_out / "result.mmd"
-        if result_mmd.exists() and not overwrite_ocr:
-            skipped.append(p1)
-            LOG.debug("DeepSeek skip page %04d (exists)", p1)
-            continue
+        for idx, p1 in enumerate(page_nums_1based, start=1):
+            LOG.info("DeepSeek page %04d (%d/%d)", p1, idx, total_pages)
+            img_path = get_page_image_path(pages_dir, p1)
+            if img_path is None:
+                eprint(f"[deepseek] missing page image for {p1:04d} in {pages_dir}")
+                continue
 
-        try:
-            # Prompt & call signature per model card.  [oai_citation:4‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
-            _ = model.infer(
-                tokenizer,
-                prompt=prompt,
-                image_file=str(img_path),
-                output_path=str(page_out),
-                base_size=base_size,
-                image_size=image_size,
-                crop_mode=crop_mode,
-                save_results=True,
+            page_out = out_root / f"page_{p1:04d}"
+            ensure_dir(page_out)
+
+            result_mmd = page_out / "result.mmd"
+            if result_mmd.exists() and not overwrite_ocr:
+                skipped.append(p1)
+                LOG.debug("DeepSeek skip page %04d (exists)", p1)
+                continue
+
+            q = ctx.Queue()
+            proc = ctx.Process(
+                target=_deepseek_single_page_worker,
+                kwargs={
+                    "queue": q,
+                    "img_path": str(img_path),
+                    "page_out": str(page_out),
+                    "model_id": model_id,
+                    "prompt": prompt,
+                    "base_size": base_size,
+                    "image_size": image_size,
+                    "crop_mode": crop_mode,
+                    "attn_implementation": attn_implementation,
+                    "revision": revision,
+                },
             )
-            safe_write_json(page_out / "meta.json", {
-                "engine": "deepseek_ocr2",
-                "generated_at": now_iso(),
-                "input_image": str(img_path),
-                "model_id": model_id,
-                "prompt": prompt,
-                "base_size": base_size,
-                "image_size": image_size,
-                "crop_mode": crop_mode,
-                "attn_implementation": attn_implementation,
-                "device": device,
-                "dtype": str(dtype),
-            })
-            done.append(p1)
-            LOG.info("DeepSeek page %04d -> %s", p1, page_out)
-        except Exception as ex:
-            eprint(f"[deepseek][ERROR] page {p1:04d}: {ex}")
+            proc.start()
+            proc.join(timeout=page_timeout_sec)
+            if proc.is_alive():
+                LOG.warning("DeepSeek page %04d timed out after %ss; terminating.", p1, page_timeout_sec)
+                proc.terminate()
+                proc.join(timeout=5)
+                timed_out.append(p1)
+                continue
 
-    LOG.info("DeepSeek-OCR-2 done=%d skipped=%d", len(done), len(skipped))
+            try:
+                result = q.get_nowait()
+            except queue_mod.Empty:
+                eprint(f"[deepseek][ERROR] page {p1:04d}: no result returned")
+                continue
+
+            if result.get("ok"):
+                done.append(p1)
+                LOG.info("DeepSeek page %04d -> %s", p1, page_out)
+            else:
+                err = result.get("error") or "unknown error"
+                eprint(f"[deepseek][ERROR] page {p1:04d}: {err}")
+    else:
+        LOG.info("Loading DeepSeek model %s", model_id)
+        tokenizer, model, device, dtype = load_deepseek_model(
+            model_id=model_id,
+            attn_implementation=attn_implementation,
+            revision=revision,
+        )
+
+        for idx, p1 in enumerate(page_nums_1based, start=1):
+            LOG.info("DeepSeek page %04d (%d/%d)", p1, idx, total_pages)
+            img_path = get_page_image_path(pages_dir, p1)
+            if img_path is None:
+                eprint(f"[deepseek] missing page image for {p1:04d} in {pages_dir}")
+                continue
+
+            page_out = out_root / f"page_{p1:04d}"
+            ensure_dir(page_out)
+
+            # DeepSeek code writes {output_path}/result.mmd when save_results=True.  [oai_citation:3‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2/blob/main/modeling_deepseekocr2.py)
+            result_mmd = page_out / "result.mmd"
+            if result_mmd.exists() and not overwrite_ocr:
+                skipped.append(p1)
+                LOG.debug("DeepSeek skip page %04d (exists)", p1)
+                continue
+
+            try:
+                # Prompt & call signature per model card.  [oai_citation:4‡Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-OCR-2)
+                _ = model.infer(
+                    tokenizer,
+                    prompt=prompt,
+                    image_file=str(img_path),
+                    output_path=str(page_out),
+                    base_size=base_size,
+                    image_size=image_size,
+                    crop_mode=crop_mode,
+                    save_results=True,
+                )
+                safe_write_json(page_out / "meta.json", {
+                    "engine": "deepseek_ocr2",
+                    "generated_at": now_iso(),
+                    "input_image": str(img_path),
+                    "model_id": model_id,
+                    "prompt": prompt,
+                    "base_size": base_size,
+                    "image_size": image_size,
+                    "crop_mode": crop_mode,
+                    "attn_implementation": attn_implementation,
+                    "device": device,
+                    "dtype": str(dtype),
+                })
+                done.append(p1)
+                LOG.info("DeepSeek page %04d -> %s", p1, page_out)
+            except Exception as ex:
+                eprint(f"[deepseek][ERROR] page {p1:04d}: {ex}")
+
+    LOG.info("DeepSeek-OCR-2 done=%d skipped=%d timed_out=%d", len(done), len(skipped), len(timed_out))
     manifest = {
         "engine": "deepseek_ocr2",
         "generated_at": now_iso(),
@@ -511,12 +634,14 @@ def run_deepseek_ocr2(
         "out_root": str(out_root),
         "done": done,
         "skipped": skipped,
+        "timed_out": timed_out,
         "model_id": model_id,
         "prompt": prompt,
         "base_size": base_size,
         "image_size": image_size,
         "crop_mode": crop_mode,
         "attn_implementation": attn_implementation,
+        "page_timeout_sec": page_timeout_sec,
         "device": device,
         "dtype": str(dtype),
     }
@@ -565,6 +690,8 @@ def main() -> int:
     ap.add_argument("--deepseek-crop-mode", action="store_true", help="Enable crop_mode=True in infer()")
     ap.add_argument("--deepseek-attn", default="eager", help="Attention impl: flash_attention_2, sdpa, or eager")
     ap.add_argument("--deepseek-revision", default="", help="Pin a specific model revision (commit hash/tag) to avoid code updates.")
+    ap.add_argument("--deepseek-page-timeout", type=int, default=0,
+                    help="If >0, run each page in a subprocess and terminate if it exceeds this many seconds.")
 
     args = ap.parse_args()
 
@@ -701,6 +828,7 @@ def main() -> int:
             crop_mode=bool(args.deepseek_crop_mode),
             attn_implementation=args.deepseek_attn,
             revision=args.deepseek_revision,
+            page_timeout_sec=args.deepseek_page_timeout,
         )
         safe_write_json(deepseek_out / "manifest.json", manifest)
 
