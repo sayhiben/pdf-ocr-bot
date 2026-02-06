@@ -39,6 +39,17 @@ def setup_logging() -> None:
 
 IMG_MD_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 IMG_HTML_RE = re.compile(r'<img[^>]*src=["\']([^"\']+)["\'][^>]*>', re.IGNORECASE)
+LINK_SPAN_RE = re.compile(r'!?\[[^\]]*]\([^)]*\)')
+PAGE_REF_RE = re.compile(
+    r"\b(?P<prefix>pages?|pgs?|pp?)"
+    r"(?P<dot>\.)?"
+    r"(?P<gap>\s*)"
+    r"(?P<start>(?:\d{1,4}|[ivxlcdm]{1,8}))"
+    r"(?P<range>(?P<sep>\s*[-–]\s*)(?P<end>(?:\d{1,4}|[ivxlcdm]{1,8})))?",
+    re.IGNORECASE,
+)
+HEADER_LINE_RE = re.compile(r"<!--\s*PAGE(?:_INDEX|_LABEL)?\b.*?-->", re.IGNORECASE)
+ANCHOR_LINE_RE = re.compile(r'<a\s+id="page-[^"]+"\s*></a>', re.IGNORECASE)
 
 
 def parse_page_range(expr: str, max_page: Optional[int] = None) -> List[int]:
@@ -103,9 +114,205 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def normalize_page_label(label: str) -> str:
+    raw = label.strip().lower()
+    if raw.isdigit():
+        return str(int(raw))
+    norm = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    if norm.isdigit():
+        return str(int(norm))
+    return norm
+
+
+def make_anchor_id(label_norm: Optional[str], page_num: int) -> str:
+    if label_norm:
+        return f"page-{label_norm}-p{page_num:04d}"
+    return f"page-p{page_num:04d}"
+
+
+def build_page_header(page_num: int, page_label: Optional[str]) -> str:
+    lines = [f"<!-- PAGE_INDEX {page_num:04d} -->"]
+    label_norm = normalize_page_label(page_label) if page_label else ""
+    if page_label:
+        lines.append(f"<!-- PAGE_LABEL {page_label} -->")
+    lines.append(f'<a id="{make_anchor_id(label_norm or None, page_num)}"></a>')
+    return "\n".join(lines) + "\n\n"
+
+
+def is_page_image_line(line: str) -> bool:
+    m = IMG_MD_RE.search(line)
+    if not m:
+        return False
+    inside = m.group(2).strip()
+    path = inside.split()[0]
+    if "assets/page_" not in path:
+        return False
+    name = Path(path).name.lower()
+    return name.startswith("page.")
+
+
+def strip_existing_header(md_text: str) -> str:
+    lines = md_text.splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+
+    saw_header = False
+    while i < len(lines) and HEADER_LINE_RE.match(lines[i].strip()):
+        saw_header = True
+        i += 1
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+
+    if i < len(lines) and ANCHOR_LINE_RE.match(lines[i].strip()):
+        saw_header = True
+        i += 1
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+
+    if saw_header and i < len(lines) and is_page_image_line(lines[i].strip()):
+        i += 1
+        while i < len(lines) and not lines[i].strip():
+            i += 1
+
+    return "\n".join(lines[i:]).lstrip("\n")
+
+
+def detect_page_label(md_text: str) -> Optional[str]:
+    body = strip_existing_header(md_text)
+    lines = []
+    in_code = False
+    for raw in body.splitlines():
+        s = raw.strip()
+        if s.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        if not s:
+            continue
+        if s.startswith("<!--"):
+            continue
+        if s.startswith("!"):
+            continue
+        lines.append(s)
+
+    def _match_label(line: str) -> Optional[str]:
+        s = line.strip()
+        s = re.sub(r"^[\W_]+|[\W_]+$", "", s)
+        if not s:
+            return None
+        m = re.match(r"^(?:page|p\.?)\s*(\d{1,4})$", s, re.IGNORECASE)
+        if m:
+            return str(int(m.group(1)))
+        m = re.match(r"^(\d{1,4})$", s)
+        if m:
+            return str(int(m.group(1)))
+        m = re.match(r"^([ivxlcdm]{1,8})$", s, re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+        return None
+
+    # Prefer footer-style numbers
+    tail = list(reversed(lines[-6:]))
+    for line in tail:
+        label = _match_label(line)
+        if label:
+            return label
+
+    head = lines[:6]
+    for line in head:
+        label = _match_label(line)
+        if label:
+            return label
+
+    return None
+
+
+def rewrite_page_refs(
+    md_text: str,
+    *,
+    label_to_page: Dict[str, int],
+    page_to_label_norm: Dict[int, str],
+    link_mode: str,
+) -> str:
+    def anchor_for_page(pnum: int) -> str:
+        return make_anchor_id(page_to_label_norm.get(pnum), pnum)
+
+    def link_target(pnum: int) -> str:
+        anchor = anchor_for_page(pnum)
+        if link_mode == "combined":
+            return f"#{anchor}"
+        return f"page_{pnum:04d}.md#{anchor}"
+
+    def replace_match(m: re.Match, spans: List[Tuple[int, int]]) -> str:
+        start_idx = m.start()
+        for s, e in spans:
+            if s <= start_idx < e:
+                return m.group(0)
+
+        prefix = m.group("prefix")
+        dot = m.group("dot") or ""
+        gap = m.group("gap") or ""
+        start = m.group("start")
+        sep = m.group("sep") or ""
+        end = m.group("end")
+
+        def _link(num_str: str) -> Optional[str]:
+            raw = num_str.strip()
+            if raw.isdigit():
+                norm = str(int(raw))
+            else:
+                norm = normalize_page_label(raw)
+            if not norm:
+                return None
+            dest = label_to_page.get(norm)
+            if dest is None:
+                return None
+            return f"[{num_str}]({link_target(dest)})"
+
+        start_link = _link(start) or start
+        if end:
+            end_link = _link(end) or end
+            return f"{prefix}{dot}{gap}{start_link}{sep}{end_link}"
+        return f"{prefix}{dot}{gap}{start_link}"
+
+    out_lines: List[str] = []
+    in_code = False
+    for line in md_text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            out_lines.append(line)
+            continue
+        if in_code:
+            out_lines.append(line)
+            continue
+        spans = [(m.start(), m.end()) for m in LINK_SPAN_RE.finditer(line)]
+        new_line = PAGE_REF_RE.sub(lambda m: replace_match(m, spans), line)
+        out_lines.append(new_line)
+    return "".join(out_lines)
+
+
+PAGE_FILE_LINK_RE = re.compile(
+    r"\((?:\./|../|[^/)]+/)?page_\d{4}\.md#(?P<anchor>page-[^)]+)\)"
+)
+
+
+def rewrite_links_for_combined(md_text: str) -> str:
+    return PAGE_FILE_LINK_RE.sub(lambda m: f"(#{m.group('anchor')})", md_text)
+
 def looks_trivial(md: str) -> bool:
     stripped = re.sub(r"\s+", "", md)
     return len(stripped) < 80
+
+
+def has_diagram_signal(md: str) -> bool:
+    if IMG_MD_RE.search(md) or IMG_HTML_RE.search(md):
+        return True
+    if re.search(r"\b(fig\.?|figure|diagram|flowchart|schematic|map)\b", md, re.IGNORECASE):
+        return True
+    return False
 
 
 def similarity(a: str, b: str, limit_chars: int = 20000) -> float:
@@ -184,16 +391,6 @@ def find_candidate_markdown_deepseek(page_dir: Path) -> Optional[Path]:
         return mmd
     mds = sorted(page_dir.rglob("*.md"))
     return mds[0] if mds else None
-
-
-def copy_page_image(page_img: Path, out_asset_dir: Path) -> str:
-    out_asset_dir.mkdir(parents=True, exist_ok=True)
-    ext = page_img.suffix.lower() or ".jpg"
-    dst_name = f"page{ext}"
-    dst = out_asset_dir / dst_name
-    if not dst.exists():
-        shutil.copy2(page_img, dst)
-    return dst_name
 
 
 def normalize_and_copy_images(
@@ -309,7 +506,11 @@ Rules (must follow):
 4) Do NOT invent content. If uncertain, choose the most plausible text supported by either candidate and/or the page image.
 5) Preserve exact numbers, dice notation (e.g. 2d6+3), symbols, and proper nouns.
 6) You may keep or drop low-value decorative artifacts, but keep meaningful sidebars, callouts, tables, charts.
-7) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
+7) If the page contains diagrams/flowcharts/schematics, prefer a Mermaid code block (```mermaid ...```) to represent them.
+   If Mermaid is not suitable, use a fenced ASCII diagram.
+   If you cannot accurately represent a chart/diagram, keep the original diagram image link instead of guessing.
+   Only keep image links for non-diagram illustrations/photos unless representation is uncertain.
+8) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
 
 Candidate A (PaddleOCR-VL):
 ---BEGIN A---
@@ -468,6 +669,7 @@ def main():
     skipped_existing = 0
     skipped_missing_candidates = 0
     processed_pages = 0
+    page_records: List[Dict[str, object]] = []
 
     for idx, page_img in enumerate(page_imgs, start=1):
         m = re.search(r"page_(\d+)\.", page_img.name)
@@ -483,9 +685,13 @@ def main():
         out_asset_page_dir = out_assets_dir / f"page_{pnum:04d}"
 
         if out_page_md.exists() and not args.overwrite:
-            # Still include in combined book
             page_md_text = read_text(out_page_md)
-            combined_chunks.append(f"\n\n<!-- PAGE {pnum:04d} -->\n\n" + page_md_text.replace("(../assets/", "(assets/"))
+            page_label = detect_page_label(page_md_text)
+            page_records.append({
+                "pnum": pnum,
+                "out_page_md": out_page_md,
+                "page_label": page_label,
+            })
             LOG.debug("Skip page %04d (final exists)", pnum)
             skipped_existing += 1
             continue
@@ -506,9 +712,6 @@ def main():
             LOG.warning("Page %04d: no candidates found, skipping.", pnum)
             skipped_missing_candidates += 1
             continue
-
-        # Copy the full page image into assets
-        page_ref = copy_page_image(page_img, out_asset_page_dir)
 
         # Normalize assets + rewrite paths so both candidates point into ../assets/page_XXXX
         rel_assets = f"../assets/page_{pnum:04d}"
@@ -539,6 +742,7 @@ def main():
         decision = ""
         used_merger = False
         sim = None
+        diagram_hint = has_diagram_signal(paddle_md) or has_diagram_signal(deepseek_md)
         if paddle_trivial and not deepseek_trivial:
             final_body = deepseek_md
             decision = "deepseek_trivial" if paddle_md_raw else "deepseek_only"
@@ -547,7 +751,7 @@ def main():
             decision = "paddle_trivial" if deepseek_md_raw else "paddle_only"
         else:
             sim = similarity(paddle_md, deepseek_md)
-            if args.only_run_merger_when_different and sim >= args.similarity_threshold:
+            if args.only_run_merger_when_different and sim >= args.similarity_threshold and not diagram_hint:
                 # Pick the "richer" candidate (simple heuristic)
                 if len(paddle_md) >= len(deepseek_md):
                     final_body = paddle_md
@@ -571,14 +775,17 @@ def main():
 
         final_body = final_body.strip()
 
-        # Always include a top anchor image of the page (so you never “lose” diagrams)
-        header = f"<!-- PAGE {pnum:04d} -->\n\n![]({rel_assets}/{page_ref})\n\n"
+        page_label = detect_page_label(final_body)
+        header = build_page_header(pnum, page_label)
         final_md = header + final_body + "\n"
 
         write_text(out_page_md, final_md)
 
-        # Add to combined book.md; fix ../assets -> assets when concatenating at root
-        combined_chunks.append("\n\n" + final_md.replace("(../assets/", "(assets/"))
+        page_records.append({
+            "pnum": pnum,
+            "out_page_md": out_page_md,
+            "page_label": page_label,
+        })
 
         decision_counts[decision] = decision_counts.get(decision, 0) + 1
         processed_pages += 1
@@ -611,12 +818,55 @@ def main():
                 "diff_stats_final_vs_paddle": diff_stats(final_body, paddle_md),
                 "diff_stats_final_vs_deepseek": diff_stats(final_body, deepseek_md),
                 "diff_file": diff_path.name if diff_path else None,
+                "page_label": page_label,
             }
             report_path = report_dir / f"page_{pnum:04d}.json"
             write_json(report_path, report)
             LOG.info("Page %04d: decision=%s sim=%s report=%s", pnum, decision, f"{sim:.3f}" if sim is not None else "n/a", report_path)
 
         LOG.info("Page %04d -> %s", pnum, out_page_md)
+
+    label_to_page: Dict[str, int] = {}
+    page_to_label_norm: Dict[int, str] = {}
+    for rec in page_records:
+        pnum = int(rec["pnum"])
+        label = rec.get("page_label")
+        if isinstance(label, str) and label.strip():
+            norm = normalize_page_label(label)
+            if norm:
+                page_to_label_norm[pnum] = norm
+                if norm in label_to_page and label_to_page[norm] != pnum:
+                    LOG.warning(
+                        "Duplicate page label '%s' found on pages %04d and %04d; keeping first.",
+                        label,
+                        label_to_page[norm],
+                        pnum,
+                    )
+                else:
+                    label_to_page[norm] = pnum
+
+    for rec in page_records:
+        pnum = int(rec["pnum"])
+        out_page_md = Path(rec["out_page_md"])
+        label = rec.get("page_label")
+        page_md_text = read_text(out_page_md)
+        body = strip_existing_header(page_md_text)
+        body = rewrite_page_refs(
+            body,
+            label_to_page=label_to_page,
+            page_to_label_norm=page_to_label_norm,
+            link_mode="per-page",
+        )
+        header = build_page_header(pnum, label if isinstance(label, str) else None)
+        final_md = header + body.strip() + "\n"
+        write_text(out_page_md, final_md)
+
+    for rec in page_records:
+        out_page_md = Path(rec["out_page_md"])
+        page_md_text = read_text(out_page_md)
+        page_md_text = page_md_text.replace("(../assets/", "(assets/")
+        page_md_text = rewrite_links_for_combined(page_md_text)
+        combined_chunks.append("\n\n" + page_md_text.strip())
 
     out_root.mkdir(parents=True, exist_ok=True)
     write_text(out_book, "\n".join(combined_chunks).strip() + "\n")
