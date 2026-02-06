@@ -30,6 +30,7 @@ PADDLE_NUMPY_PIN="${PADDLE_NUMPY_PIN:-1}"
 PADDLEX_HOME="${PADDLEX_HOME:-$WORKDIR/.paddlex}"
 PADDLE_PDX_HOME="${PADDLE_PDX_HOME:-$PADDLEX_HOME}"
 PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$PADDLEX_HOME}"
+INSTALL_RSYNC="${INSTALL_RSYNC:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -88,6 +89,36 @@ pip_install() {
   fi
 }
 
+ensure_rsync() {
+  if [[ "${INSTALL_RSYNC}" != "1" ]]; then
+    return
+  fi
+  if command -v rsync >/dev/null 2>&1; then
+    log "[deps] rsync already installed"
+    return
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "[deps][WARN] rsync not found and apt-get is unavailable. Install rsync manually or set INSTALL_RSYNC=0."
+    return
+  fi
+  if [[ "$(id -u)" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      log "[deps] Installing rsync via sudo apt-get"
+      sudo apt-get update -y || true
+      sudo apt-get install -y rsync || true
+    else
+      echo "[deps][WARN] rsync not found and sudo unavailable. Install rsync manually or set INSTALL_RSYNC=0."
+    fi
+  else
+    log "[deps] Installing rsync via apt-get"
+    apt-get update -y || true
+    apt-get install -y rsync || true
+  fi
+  if ! command -v rsync >/dev/null 2>&1; then
+    echo "[deps][WARN] rsync install failed or unavailable. Install rsync manually or set INSTALL_RSYNC=0."
+  fi
+}
+
 mkdir -p "${WORKDIR}" "${VENV_DIR}" "${PIP_CACHE_DIR}" "${XDG_CACHE_HOME}" "${PADDLEX_HOME}" "${PADDLE_PDX_HOME}" "${PADDLE_PDX_CACHE_HOME}"
 
 if [[ ! -f "${PDF_OCR}" ]]; then
@@ -117,11 +148,14 @@ log "[info] PADDLEX_HOME=${PADDLEX_HOME}"
 log "[info] PADDLE_PDX_HOME=${PADDLE_PDX_HOME}"
 log "[info] PADDLE_PDX_CACHE_HOME=${PADDLE_PDX_CACHE_HOME}"
 log "[info] PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK}"
+log "[info] INSTALL_RSYNC=${INSTALL_RSYNC}"
 log "[info] DEEPSEEK_REVISION=${DEEPSEEK_REVISION:-<none>}"
 log "[info] MERGE_REPORT=${MERGE_REPORT}"
 log "[info] MERGE_REPORT_DIR=${MERGE_REPORT_DIR}"
 log "[info] MERGE_DIFF_CONTEXT=${MERGE_DIFF_CONTEXT}"
 log "[info] MERGE_DIFF_MAX_LINES=${MERGE_DIFF_MAX_LINES}"
+
+ensure_rsync
 
 # ---- Helpers ----
 ensure_venv() {

@@ -300,19 +300,47 @@ PAGE_FILE_LINK_RE = re.compile(
 
 
 def rewrite_links_for_combined(md_text: str) -> str:
-    return PAGE_FILE_LINK_RE.sub(lambda m: f"(#{m.group('anchor')})", md_text)
+    md_text = PAGE_FILE_LINK_RE.sub(lambda m: f"(#{m.group('anchor')})", md_text)
+    md_text = re.sub(r"\((?:\./)?\.\./assets/", "(assets/", md_text)
+    return md_text
+
+
+def extract_linked_assets(md_text: str, rel_assets: str, asset_dir: Path) -> set[str]:
+    keep: set[str] = set()
+
+    def _handle(path_str: str) -> None:
+        tokens = path_str.strip().split()
+        if not tokens:
+            return
+        path = tokens[0]
+        if path.startswith(rel_assets + "/"):
+            name = path[len(rel_assets) + 1:]
+            if name:
+                keep.add(name)
+            return
+        # If the link is just a filename and it exists in this asset dir, keep it.
+        if "/" not in path and (asset_dir / path).exists():
+            keep.add(path)
+
+    for m in IMG_MD_RE.finditer(md_text):
+        _handle(m.group(2))
+    for m in IMG_HTML_RE.finditer(md_text):
+        _handle(m.group(1))
+    return keep
+
+
+def prune_unlinked_assets(asset_dir: Path, keep: set[str]) -> None:
+    if not asset_dir.exists():
+        return
+    for p in asset_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.name not in keep:
+            p.unlink()
 
 def looks_trivial(md: str) -> bool:
     stripped = re.sub(r"\s+", "", md)
     return len(stripped) < 80
-
-
-def has_diagram_signal(md: str) -> bool:
-    if IMG_MD_RE.search(md) or IMG_HTML_RE.search(md):
-        return True
-    if re.search(r"\b(fig\.?|figure|diagram|flowchart|schematic|map)\b", md, re.IGNORECASE):
-        return True
-    return False
 
 
 def similarity(a: str, b: str, limit_chars: int = 20000) -> float:
@@ -506,10 +534,8 @@ Rules (must follow):
 4) Do NOT invent content. If uncertain, choose the most plausible text supported by either candidate and/or the page image.
 5) Preserve exact numbers, dice notation (e.g. 2d6+3), symbols, and proper nouns.
 6) You may keep or drop low-value decorative artifacts, but keep meaningful sidebars, callouts, tables, charts.
-7) If the page contains diagrams/flowcharts/schematics, prefer a Mermaid code block (```mermaid ...```) to represent them.
-   If Mermaid is not suitable, use a fenced ASCII diagram.
-   If you cannot accurately represent a chart/diagram, keep the original diagram image link instead of guessing.
-   Only keep image links for non-diagram illustrations/photos unless representation is uncertain.
+7) If the page contains charts/diagrams/flowcharts/schematics, keep the original image link for them.
+   Do NOT attempt to recreate charts/diagrams in Mermaid or ASCII.
 8) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
 
 Candidate A (PaddleOCR-VL):
@@ -742,7 +768,6 @@ def main():
         decision = ""
         used_merger = False
         sim = None
-        diagram_hint = has_diagram_signal(paddle_md) or has_diagram_signal(deepseek_md)
         if paddle_trivial and not deepseek_trivial:
             final_body = deepseek_md
             decision = "deepseek_trivial" if paddle_md_raw else "deepseek_only"
@@ -751,7 +776,7 @@ def main():
             decision = "paddle_trivial" if deepseek_md_raw else "paddle_only"
         else:
             sim = similarity(paddle_md, deepseek_md)
-            if args.only_run_merger_when_different and sim >= args.similarity_threshold and not diagram_hint:
+            if args.only_run_merger_when_different and sim >= args.similarity_threshold:
                 # Pick the "richer" candidate (simple heuristic)
                 if len(paddle_md) >= len(deepseek_md):
                     final_body = paddle_md
@@ -780,6 +805,9 @@ def main():
         final_md = header + final_body + "\n"
 
         write_text(out_page_md, final_md)
+
+        keep_assets = extract_linked_assets(final_md, rel_assets, out_asset_page_dir)
+        prune_unlinked_assets(out_asset_page_dir, keep_assets)
 
         page_records.append({
             "pnum": pnum,
@@ -861,10 +889,14 @@ def main():
         final_md = header + body.strip() + "\n"
         write_text(out_page_md, final_md)
 
+        out_asset_page_dir = out_assets_dir / f"page_{pnum:04d}"
+        rel_assets = f"../assets/page_{pnum:04d}"
+        keep_assets = extract_linked_assets(final_md, rel_assets, out_asset_page_dir)
+        prune_unlinked_assets(out_asset_page_dir, keep_assets)
+
     for rec in page_records:
         out_page_md = Path(rec["out_page_md"])
         page_md_text = read_text(out_page_md)
-        page_md_text = page_md_text.replace("(../assets/", "(assets/")
         page_md_text = rewrite_links_for_combined(page_md_text)
         combined_chunks.append("\n\n" + page_md_text.strip())
 

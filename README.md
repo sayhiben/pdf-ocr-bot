@@ -78,6 +78,7 @@ Environment variables supported by `run_ocr.sh`:
 - `PADDLE_PDX_HOME` (default `${PADDLEX_HOME}`)
 - `PADDLE_PDX_CACHE_HOME` (default `${PADDLEX_HOME}`)
 - `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` (default `1`)
+- `INSTALL_RSYNC` (default `1`, attempts to install `rsync` via `apt-get` if missing; set `0` to skip)
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
 - `DEEPSEEK_REVISION` (default empty; set to a commit hash/tag to pin model code)
 - `DEEPSEEK_ATTN` (default `eager`)
