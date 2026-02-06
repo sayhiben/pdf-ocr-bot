@@ -198,7 +198,7 @@ def detect_page_label(md_text: str) -> Optional[str]:
             continue
         lines.append(s)
 
-    def _match_label(line: str) -> Optional[str]:
+    def _match_label(line: str, *, allow_loose: bool) -> Optional[str]:
         s = line.strip()
         s = re.sub(r"^[\W_]+|[\W_]+$", "", s)
         if not s:
@@ -212,21 +212,38 @@ def detect_page_label(md_text: str) -> Optional[str]:
         m = re.match(r"^([ivxlcdm]{1,8})$", s, re.IGNORECASE)
         if m:
             return m.group(1).upper()
+        if allow_loose:
+            m = re.search(r"(?:^|\s)(\d{1,4})$", s)
+            if m:
+                return str(int(m.group(1)))
+            m = re.search(r"(?:^|\s)([ivxlcdm]{1,8})$", s, re.IGNORECASE)
+            if m:
+                return m.group(1).upper()
         return None
 
     # Prefer footer-style numbers
     tail = list(reversed(lines[-6:]))
     for line in tail:
-        label = _match_label(line)
+        label = _match_label(line, allow_loose=True)
         if label:
             return label
 
     head = lines[:6]
     for line in head:
-        label = _match_label(line)
+        label = _match_label(line, allow_loose=False)
         if label:
             return label
 
+    return None
+
+
+def choose_page_label(*candidates: Optional[str]) -> Optional[str]:
+    for text in candidates:
+        if not text:
+            continue
+        label = detect_page_label(text)
+        if label:
+            return label
     return None
 
 
@@ -849,7 +866,7 @@ def main():
 
         final_body = final_body.strip()
 
-        page_label = detect_page_label(final_body)
+        page_label = choose_page_label(final_body, paddle_md_raw, deepseek_md_raw)
         header = build_page_header(pnum, page_label)
         final_md = header + final_body + "\n"
 
