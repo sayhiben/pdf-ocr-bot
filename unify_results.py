@@ -133,10 +133,8 @@ def make_anchor_id(label_norm: Optional[str], page_num: int) -> str:
 
 def build_page_header(page_num: int, page_label: Optional[str]) -> str:
     lines = [f"<!-- PAGE_INDEX {page_num:04d} -->"]
-    label_norm = normalize_page_label(page_label) if page_label else ""
     if page_label:
         lines.append(f"<!-- PAGE_LABEL {page_label} -->")
-    lines.append(f'<a id="{make_anchor_id(label_norm or None, page_num)}"></a>')
     return "\n".join(lines) + "\n\n"
 
 
@@ -945,12 +943,6 @@ def main():
         label = rec.get("page_label")
         page_md_text = read_text(out_page_md)
         body = strip_existing_header(page_md_text)
-        body = rewrite_page_refs(
-            body,
-            label_to_page=label_to_page,
-            page_to_label_norm=page_to_label_norm,
-            link_mode="per-page",
-        )
         header = build_page_header(pnum, label if isinstance(label, str) else None)
         final_md = header + body.strip() + "\n"
         write_text(out_page_md, final_md)
