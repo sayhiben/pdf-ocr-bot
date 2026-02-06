@@ -87,6 +87,7 @@ Environment variables supported by `run_ocr.sh`:
 - `DEEPSEEK_PAGE_TIMEOUT` (default `120`, seconds; if set, each DeepSeek page runs in a subprocess and is killed on timeout)
 - `DEEPSEEK_BASE_SIZE` (default `1536`, DeepSeek infer `base_size`)
 - `DEEPSEEK_IMAGE_SIZE` (default `1024`, DeepSeek infer `image_size`)
+- `SKIP_DEEPSEEK` (default `0`, set `1` to skip DeepSeek OCR and merge using Paddle-only output)
 - `MERGE_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
 - `MERGE_MAX_NEW_TOKENS` (default `4096`)
 - `MERGE_FAST` (default `1`)

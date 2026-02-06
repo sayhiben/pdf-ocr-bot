@@ -51,6 +51,7 @@ DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-0}" # 1 = crop_mode=True
 DEEPSEEK_PAGE_TIMEOUT="${DEEPSEEK_PAGE_TIMEOUT:-120}" # seconds; 0 disables timeout
 DEEPSEEK_BASE_SIZE="${DEEPSEEK_BASE_SIZE:-1536}"
 DEEPSEEK_IMAGE_SIZE="${DEEPSEEK_IMAGE_SIZE:-1024}"
+SKIP_DEEPSEEK="${SKIP_DEEPSEEK:-0}"
 
 # ---- Merger model ----
 MERGE_MODEL="${MERGE_MODEL:-Qwen/Qwen2.5-VL-7B-Instruct}"
@@ -158,6 +159,7 @@ log "[info] DEEPSEEK_REVISION=${DEEPSEEK_REVISION:-<none>}"
 log "[info] DEEPSEEK_PAGE_TIMEOUT=${DEEPSEEK_PAGE_TIMEOUT}"
 log "[info] DEEPSEEK_BASE_SIZE=${DEEPSEEK_BASE_SIZE}"
 log "[info] DEEPSEEK_IMAGE_SIZE=${DEEPSEEK_IMAGE_SIZE}"
+log "[info] SKIP_DEEPSEEK=${SKIP_DEEPSEEK}"
 log "[info] MERGE_REPORT=${MERGE_REPORT}"
 log "[info] MERGE_REPORT_DIR=${MERGE_REPORT_DIR}"
 log "[info] MERGE_DIFF_CONTEXT=${MERGE_DIFF_CONTEXT}"
@@ -332,38 +334,43 @@ log "[step] PaddleOCR-VL candidates"
 "${PY_PADDLE}" "${PDF_OCR}" "${PADDLE_ARGS[@]}"
 
 # ---- 2) DeepSeek env: deepseek OCR ----
-VENV_DEEPSEEK="${VENV_DIR}/deepseek"
-ensure_venv "${VENV_DEEPSEEK}" "${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES}"
-PY_DEEPSEEK="${VENV_DEEPSEEK}/bin/python"
-PIP_DEEPSEEK="${VENV_DEEPSEEK}/bin/pip"
-install_deepseek_stack "${PY_DEEPSEEK}" "${PIP_DEEPSEEK}"
+if [[ "${SKIP_DEEPSEEK}" == "1" ]]; then
+  log "[step] DeepSeek-OCR-2 candidates (skipped)"
+  mkdir -p "${WORKDIR}/ocr_deepseek"
+else
+  VENV_DEEPSEEK="${VENV_DIR}/deepseek"
+  ensure_venv "${VENV_DEEPSEEK}" "${DEEPSEEK_USE_SYSTEM_SITE_PACKAGES}"
+  PY_DEEPSEEK="${VENV_DEEPSEEK}/bin/python"
+  PIP_DEEPSEEK="${VENV_DEEPSEEK}/bin/pip"
+  install_deepseek_stack "${PY_DEEPSEEK}" "${PIP_DEEPSEEK}"
 
-DEEPSEEK_ARGS=(
-  --engine deepseek
-  --workdir "${WORKDIR}"
-  --deepseek-model "${DEEPSEEK_MODEL}"
-  --deepseek-attn "${DEEPSEEK_ATTN}"
-  --deepseek-base-size "${DEEPSEEK_BASE_SIZE}"
-  --deepseek-image-size "${DEEPSEEK_IMAGE_SIZE}"
-)
-if [[ -n "${DEEPSEEK_REVISION}" ]]; then
-  DEEPSEEK_ARGS+=( --deepseek-revision "${DEEPSEEK_REVISION}" )
-fi
-if [[ "${DEEPSEEK_CROP_MODE}" == "1" ]]; then
-  DEEPSEEK_ARGS+=( --deepseek-crop-mode )
-fi
-if [[ "${DEEPSEEK_PAGE_TIMEOUT}" != "0" ]]; then
-  DEEPSEEK_ARGS+=( --deepseek-page-timeout "${DEEPSEEK_PAGE_TIMEOUT}" )
-fi
-if [[ "${OVERWRITE_ALL}" == "1" ]]; then
-  DEEPSEEK_ARGS+=( --overwrite-ocr )
-fi
-if [[ -n "${PAGES}" ]]; then
-  DEEPSEEK_ARGS+=( --pages "${PAGES}" )
-fi
+  DEEPSEEK_ARGS=(
+    --engine deepseek
+    --workdir "${WORKDIR}"
+    --deepseek-model "${DEEPSEEK_MODEL}"
+    --deepseek-attn "${DEEPSEEK_ATTN}"
+    --deepseek-base-size "${DEEPSEEK_BASE_SIZE}"
+    --deepseek-image-size "${DEEPSEEK_IMAGE_SIZE}"
+  )
+  if [[ -n "${DEEPSEEK_REVISION}" ]]; then
+    DEEPSEEK_ARGS+=( --deepseek-revision "${DEEPSEEK_REVISION}" )
+  fi
+  if [[ "${DEEPSEEK_CROP_MODE}" == "1" ]]; then
+    DEEPSEEK_ARGS+=( --deepseek-crop-mode )
+  fi
+  if [[ "${DEEPSEEK_PAGE_TIMEOUT}" != "0" ]]; then
+    DEEPSEEK_ARGS+=( --deepseek-page-timeout "${DEEPSEEK_PAGE_TIMEOUT}" )
+  fi
+  if [[ "${OVERWRITE_ALL}" == "1" ]]; then
+    DEEPSEEK_ARGS+=( --overwrite-ocr )
+  fi
+  if [[ -n "${PAGES}" ]]; then
+    DEEPSEEK_ARGS+=( --pages "${PAGES}" )
+  fi
 
-log "[step] DeepSeek-OCR-2 candidates"
-"${PY_DEEPSEEK}" "${PDF_OCR}" "${DEEPSEEK_ARGS[@]}"
+  log "[step] DeepSeek-OCR-2 candidates"
+  "${PY_DEEPSEEK}" "${PDF_OCR}" "${DEEPSEEK_ARGS[@]}"
+fi
 
 # ---- 3) Merge env: Qwen2.5-VL unify ----
 VENV_MERGE="${VENV_DIR}/merge"
