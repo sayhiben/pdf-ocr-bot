@@ -302,6 +302,12 @@ PAGE_FILE_LINK_RE = re.compile(
 def rewrite_links_for_combined(md_text: str) -> str:
     md_text = PAGE_FILE_LINK_RE.sub(lambda m: f"(#{m.group('anchor')})", md_text)
     md_text = re.sub(r"\((?:\./)?\.\./assets/", "(assets/", md_text)
+    md_text = re.sub(
+        r'(<img[^>]*\bsrc=["\'])(?:\./)?\.\./assets/',
+        r"\1assets/",
+        md_text,
+        flags=re.IGNORECASE,
+    )
     return md_text
 
 

@@ -31,6 +31,7 @@ PADDLEX_HOME="${PADDLEX_HOME:-$WORKDIR/.paddlex}"
 PADDLE_PDX_HOME="${PADDLE_PDX_HOME:-$PADDLEX_HOME}"
 PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$PADDLEX_HOME}"
 INSTALL_RSYNC="${INSTALL_RSYNC:-1}"
+OVERWRITE_ALL="${OVERWRITE_ALL:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PDF_OCR="${SCRIPT_DIR}/pdf_ocr.py"
@@ -149,6 +150,7 @@ log "[info] PADDLE_PDX_HOME=${PADDLE_PDX_HOME}"
 log "[info] PADDLE_PDX_CACHE_HOME=${PADDLE_PDX_CACHE_HOME}"
 log "[info] PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK}"
 log "[info] INSTALL_RSYNC=${INSTALL_RSYNC}"
+log "[info] OVERWRITE_ALL=${OVERWRITE_ALL}"
 log "[info] DEEPSEEK_REVISION=${DEEPSEEK_REVISION:-<none>}"
 log "[info] MERGE_REPORT=${MERGE_REPORT}"
 log "[info] MERGE_REPORT_DIR=${MERGE_REPORT_DIR}"
@@ -299,6 +301,9 @@ RENDER_ARGS=(
 if [[ "${PREFER_EMBEDDED}" == "1" ]]; then
   RENDER_ARGS+=( --prefer-embedded )
 fi
+if [[ "${OVERWRITE_ALL}" == "1" ]]; then
+  RENDER_ARGS+=( --overwrite-pages )
+fi
 if [[ -n "${PAGES}" ]]; then
   RENDER_ARGS+=( --pages "${PAGES}" )
 fi
@@ -310,6 +315,9 @@ PADDLE_ARGS=(
   --engine paddle
   --workdir "${WORKDIR}"
 )
+if [[ "${OVERWRITE_ALL}" == "1" ]]; then
+  PADDLE_ARGS+=( --overwrite-ocr )
+fi
 if [[ -n "${PAGES}" ]]; then
   PADDLE_ARGS+=( --pages "${PAGES}" )
 fi
@@ -336,6 +344,9 @@ fi
 if [[ "${DEEPSEEK_CROP_MODE}" == "1" ]]; then
   DEEPSEEK_ARGS+=( --deepseek-crop-mode )
 fi
+if [[ "${OVERWRITE_ALL}" == "1" ]]; then
+  DEEPSEEK_ARGS+=( --overwrite-ocr )
+fi
 if [[ -n "${PAGES}" ]]; then
   DEEPSEEK_ARGS+=( --pages "${PAGES}" )
 fi
@@ -358,6 +369,9 @@ MERGE_ARGS=(
   --model "${MERGE_MODEL}"
   --max-new-tokens "${MERGE_MAX_NEW_TOKENS}"
 )
+if [[ "${OVERWRITE_ALL}" == "1" ]]; then
+  MERGE_ARGS+=( --overwrite )
+fi
 if [[ -n "${PAGES}" ]]; then
   MERGE_ARGS+=( --page-range "${PAGES}" )
 fi
