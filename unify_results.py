@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
@@ -520,8 +521,45 @@ def extract_markdown_from_fenced(text: str) -> str:
     return text.strip()
 
 
+def repetition_signal(md: str) -> Optional[str]:
+    lines = []
+    for raw in md.splitlines():
+        s = re.sub(r"\s+", " ", raw.strip())
+        if not s:
+            continue
+        if s.startswith("<!--") or s.startswith("```"):
+            continue
+        lines.append(s)
+
+    if len(lines) < 10:
+        return None
+
+    counts = Counter(lines)
+    most_common_line, count = counts.most_common(1)[0]
+    ratio = count / max(1, len(lines))
+    repeated_ratio = sum(c for c in counts.values() if c >= 3) / max(1, len(lines))
+
+    if count >= 6 and (ratio >= 0.25 or repeated_ratio >= 0.5):
+        preview = most_common_line
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        return f"repetition detected: '{preview}' repeats {count}x ({ratio:.0%} of lines)"
+    return None
+
+
 def build_merger_prompt(paddle_md: str, deepseek_md: str) -> str:
     # Strong constraints help reduce hallucination and keep image links valid.
+    quality_notes = []
+    paddle_rep = repetition_signal(paddle_md)
+    deepseek_rep = repetition_signal(deepseek_md)
+    if paddle_rep:
+        quality_notes.append(f"Candidate A issue: {paddle_rep}. Treat Candidate A as unreliable for repeated sections.")
+    if deepseek_rep:
+        quality_notes.append(f"Candidate B issue: {deepseek_rep}. Treat Candidate B as unreliable for repeated sections.")
+    quality_block = ""
+    if quality_notes:
+        quality_block = "Quality notes:\n- " + "\n- ".join(quality_notes) + "\n"
+
     return f"""
 You are an expert OCR post-editor for scanned tabletop RPG books.
 
@@ -544,7 +582,10 @@ Rules (must follow):
    Use top-level bullets for main categories and nested bullets for subcategories/items. Preserve column order (left-to-right, top-to-bottom).
 8) If the page contains charts/diagrams/flowcharts/schematics, keep the original image link for them.
    Do NOT attempt to recreate charts/diagrams in Mermaid or ASCII.
-9) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
+9) If one candidate is clearly corrupted (e.g., repeated lines, garbled tokens, duplicated blocks), ignore the corrupted portions and rely on the other candidate and the page image.
+10) CRITICAL: Use ONLY image links that already appear in Candidate A or Candidate B. Do not create new filenames.
+
+{quality_block}
 
 Candidate A (PaddleOCR-VL):
 ---BEGIN A---

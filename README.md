@@ -84,7 +84,7 @@ Environment variables supported by `run_ocr.sh`:
 - `DEEPSEEK_REVISION` (default empty; set to a commit hash/tag to pin model code)
 - `DEEPSEEK_ATTN` (default `eager`)
 - `DEEPSEEK_CROP_MODE` (default `0`)
-- `DEEPSEEK_PAGE_TIMEOUT` (default `20`, seconds; if set, each DeepSeek page runs in a subprocess and is killed on timeout)
+- `DEEPSEEK_PAGE_TIMEOUT` (default `120`, seconds; if set, each DeepSeek page runs in a subprocess and is killed on timeout)
 - `DEEPSEEK_BASE_SIZE` (default `1536`, DeepSeek infer `base_size`)
 - `DEEPSEEK_IMAGE_SIZE` (default `1024`, DeepSeek infer `image_size`)
 - `MERGE_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
