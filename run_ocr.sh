@@ -47,7 +47,7 @@ PREFER_EMBEDDED="${PREFER_EMBEDDED:-1}"   # 1 = attempt embedded extraction firs
 DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-ai/DeepSeek-OCR-2}"
 DEEPSEEK_REVISION="${DEEPSEEK_REVISION:-}"
 DEEPSEEK_ATTN="${DEEPSEEK_ATTN:-eager}"   # eager is safest; flash_attention_2 if installed
-DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-1}" # 1 = crop_mode=True
+DEEPSEEK_CROP_MODE="${DEEPSEEK_CROP_MODE:-0}" # 1 = crop_mode=True
 
 # ---- Merger model ----
 MERGE_MODEL="${MERGE_MODEL:-Qwen/Qwen2.5-VL-7B-Instruct}"

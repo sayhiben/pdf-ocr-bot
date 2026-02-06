@@ -83,7 +83,7 @@ Environment variables supported by `run_ocr.sh`:
 - `DEEPSEEK_MODEL` (default `deepseek-ai/DeepSeek-OCR-2`)
 - `DEEPSEEK_REVISION` (default empty; set to a commit hash/tag to pin model code)
 - `DEEPSEEK_ATTN` (default `eager`)
-- `DEEPSEEK_CROP_MODE` (default `1`)
+- `DEEPSEEK_CROP_MODE` (default `0`)
 - `MERGE_MODEL` (default `Qwen/Qwen2.5-VL-7B-Instruct`)
 - `MERGE_MAX_NEW_TOKENS` (default `4096`)
 - `MERGE_FAST` (default `1`)
